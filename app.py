@@ -80,7 +80,18 @@ def analyze_master_intelligence(name, url, genre, raw_text=""):
 
     try:
         genai.configure(api_key=gemini_key)
-        model = genai.GenerativeModel("gemini-1.5-flash")
+        
+        # モデル取得の試行
+        target_model = None
+        for m_name in ["gemini-1.5-flash-latest", "gemini-1.5-flash", "gemini-1.0-pro", "gemini-pro"]:
+            try:
+                target_model = genai.GenerativeModel(m_name)
+                break
+            except Exception:
+                continue
+
+        if not target_model:
+            target_model = genai.GenerativeModel("gemini-pro")
 
         today_str = datetime.date.today().strftime("%Y-%m-%d")
         prompt = f"""
@@ -105,7 +116,7 @@ def analyze_master_intelligence(name, url, genre, raw_text=""):
   "market_trend": "高需要・定価超え推移"
 }}
 """
-        response = model.generate_content(prompt)
+        response = target_model.generate_content(prompt)
         txt = response.text.strip()
         txt = txt.replace("```json", "").replace("```", "").strip()
         data = json.loads(txt)
@@ -115,7 +126,7 @@ def analyze_master_intelligence(name, url, genre, raw_text=""):
         data["sns_genre"] = genre
         return data
     except Exception as e:
-        st.error(f"AI解析中にエラーが発生しました: {e}")
+        st.error(f"AI解析エラー詳細: {e}")
         return None
 
 # --- UIメイン ---
