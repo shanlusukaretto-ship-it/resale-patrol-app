@@ -54,7 +54,7 @@ def delete_from_db(item_id):
             pass
     st.session_state.monitored_items = [x for x in st.session_state.monitored_items if str(x.get("id")) != str(item_id)]
 
-# --- AI解析エンジン（最新 Google GenAI SDK 対応） ---
+# --- AI解析エンジン ---
 def analyze_master_intelligence(name, url, genre, raw_text=""):
     if not gemini_key:
         st.error("GEMINI_API_KEY が設定されていません。Secretsを確認してください。")
@@ -87,7 +87,7 @@ def analyze_master_intelligence(name, url, genre, raw_text=""):
 }}
 """
         response = client.models.generate_content(
-            model="gemini-2.5-flash",
+            model="gemini-3.6-flash",
             contents=prompt
         )
         
