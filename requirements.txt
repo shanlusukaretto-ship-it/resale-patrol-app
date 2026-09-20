@@ -1,7 +1,6 @@
 streamlit
-google-genai
 supabase
-requests
+google-generativeai
 beautifulsoup4
-pandas
 feedparser
+requests
