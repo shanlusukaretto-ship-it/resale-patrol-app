@@ -2,10 +2,7 @@ import streamlit as st
 import datetime
 import urllib.parse
 import json
-import requests
-from bs4 import BeautifulSoup
-import feedparser
-import google.generativeai as genai
+from google import genai
 from supabase import create_client, Client
 
 st.set_page_config(
@@ -15,24 +12,10 @@ st.set_page_config(
     initial_sidebar_state="collapsed"
 )
 
-# スタイル定義
-st.markdown("""
-<style>
-    .badge-auto { color: #155724; background-color: #d4edda; padding: 2px 6px; border-radius: 4px; font-weight: bold; font-size: 0.8em; }
-    .badge-x { color: #004085; background-color: #cce5ff; padding: 2px 6px; border-radius: 4px; font-weight: bold; font-size: 0.8em; }
-    .genre-badge { background-color: #e8daef; color: #5b2c6f; padding: 2px 6px; border-radius: 4px; font-size: 0.8em; font-weight: bold; }
-    .date-badge { background-color: #fff3cd; color: #856404; padding: 3px 6px; border-radius: 4px; font-weight: bold; font-size: 0.85em; }
-    .date-expired { background-color: #e2e3e5; color: #383d41; padding: 3px 6px; border-radius: 4px; font-size: 0.85em; }
-</style>
-""", unsafe_allow_html=True)
-
 # --- 設定管理 ---
-with st.sidebar:
-    st.header("⚙️ システム設定")
-    gemini_key = st.secrets.get("GEMINI_API_KEY", st.text_input("Gemini API Key", type="password"))
-    sb_url = st.secrets.get("SUPABASE_URL", st.text_input("Supabase URL"))
-    sb_key = st.secrets.get("SUPABASE_KEY", st.text_input("Supabase Anon Key", type="password"))
-    discord_webhook = st.secrets.get("DISCORD_WEBHOOK_URL", "")
+gemini_key = st.secrets.get("GEMINI_API_KEY", "")
+sb_url = st.secrets.get("SUPABASE_URL", "")
+sb_key = st.secrets.get("SUPABASE_KEY", "")
 
 supabase: Client = None
 if sb_url and sb_key:
@@ -49,8 +32,7 @@ def load_db():
         try:
             res = supabase.table("items").select("*").order("deadline_date", desc=False).execute()
             return res.data
-        except Exception as e:
-            st.warning(f"DB読み込みフォールバック: {e}")
+        except Exception:
             return st.session_state.monitored_items
     return st.session_state.monitored_items
 
@@ -72,31 +54,19 @@ def delete_from_db(item_id):
             pass
     st.session_state.monitored_items = [x for x in st.session_state.monitored_items if str(x.get("id")) != str(item_id)]
 
-# --- AI解析エンジン ---
+# --- AI解析エンジン（最新 Google GenAI SDK 対応） ---
 def analyze_master_intelligence(name, url, genre, raw_text=""):
     if not gemini_key:
-        st.error("Gemini API Keyが設定されていません。Secretsを確認してください。")
+        st.error("GEMINI_API_KEY が設定されていません。Secretsを確認してください。")
         return None
 
     try:
-        genai.configure(api_key=gemini_key)
-        
-        # モデル取得の試行
-        target_model = None
-        for m_name in ["gemini-1.5-flash-latest", "gemini-1.5-flash", "gemini-1.0-pro", "gemini-pro"]:
-            try:
-                target_model = genai.GenerativeModel(m_name)
-                break
-            except Exception:
-                continue
-
-        if not target_model:
-            target_model = genai.GenerativeModel("gemini-pro")
-
+        client = genai.Client(api_key=gemini_key)
         today_str = datetime.date.today().strftime("%Y-%m-%d")
+        
         prompt = f"""
-本日は {today_str} です。あなたは限定アイテム（ソフビ、TCG、プレバン限定品）の専門アナリストです。
-提供された情報から相場・定価・スケジュールを推計し、必ず以下の純粋なJSONのみを出力してください（マークダウンのバッククォートも不要です）。
+本日は {today_str} です。あなたは限定品（ソフビ、TCG、プレバン限定品）の専門アナリストです。
+提供された情報から相場・定価・スケジュールを推計し、必ず以下の純粋なJSONのみを出力してください（Markdown記法は不要）。
 
 【対象】
 - 名称/タイトル: {name}
@@ -116,7 +86,11 @@ def analyze_master_intelligence(name, url, genre, raw_text=""):
   "market_trend": "高需要・定価超え推移"
 }}
 """
-        response = target_model.generate_content(prompt)
+        response = client.models.generate_content(
+            model="gemini-2.5-flash",
+            contents=prompt
+        )
+        
         txt = response.text.strip()
         txt = txt.replace("```json", "").replace("```", "").strip()
         data = json.loads(txt)
@@ -134,7 +108,7 @@ st.title("⚡ 自律巡回＆定価自衛ボード")
 
 # 1. 自動巡回実行ボタン
 if st.button("🔄 全自動マスター巡回", use_container_width=True):
-    with st.spinner("情報スキャン中..."):
+    with st.spinner("情報スキャン＆AI解析中..."):
         sample_hits = [
             {"name": "ワンピースカード 新時代の主役 BOX", "url": "https://www.onepiece-cardgame.com/", "genre": "TCG・トレカ", "type": "公式巡回"},
             {"name": "墓場の画廊限定 ソフビ怪獣シリーズ", "url": "https://store.hakabanogarou.jp/", "genre": "ソフビ・ホビー", "type": "公式巡回"}
@@ -221,7 +195,7 @@ with st.expander("📥 Xポストや個別URLを手動で投入する", expanded
 
 st.markdown("---")
 
-# 3. リスト一覧
+# 3. 監視リスト一覧
 items = load_db()
 st.subheader(f"📋 監視中案件（{len(items)} 件）")
 
