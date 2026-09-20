@@ -2,6 +2,9 @@ import streamlit as st
 import datetime
 import urllib.parse
 import json
+import requests
+from bs4 import BeautifulSoup
+import feedparser
 from google import genai
 from supabase import create_client, Client
 
@@ -12,10 +15,22 @@ st.set_page_config(
     initial_sidebar_state="collapsed"
 )
 
+# スタイル定義
+st.markdown("""
+<style>
+    .badge-auto { color: #155724; background-color: #d4edda; padding: 2px 6px; border-radius: 4px; font-weight: bold; font-size: 0.8em; }
+    .badge-x { color: #004085; background-color: #cce5ff; padding: 2px 6px; border-radius: 4px; font-weight: bold; font-size: 0.8em; }
+    .genre-badge { background-color: #e8daef; color: #5b2c6f; padding: 2px 6px; border-radius: 4px; font-size: 0.8em; font-weight: bold; }
+    .date-badge { background-color: #fff3cd; color: #856404; padding: 3px 6px; border-radius: 4px; font-weight: bold; font-size: 0.85em; }
+    .date-expired { background-color: #e2e3e5; color: #383d41; padding: 3px 6px; border-radius: 4px; font-size: 0.85em; }
+</style>
+""", unsafe_allow_html=True)
+
 # --- 設定管理 ---
 gemini_key = st.secrets.get("GEMINI_API_KEY", "")
 sb_url = st.secrets.get("SUPABASE_URL", "")
 sb_key = st.secrets.get("SUPABASE_KEY", "")
+discord_webhook = st.secrets.get("DISCORD_WEBHOOK_URL", "")
 
 supabase: Client = None
 if sb_url and sb_key:
@@ -54,7 +69,7 @@ def delete_from_db(item_id):
             pass
     st.session_state.monitored_items = [x for x in st.session_state.monitored_items if str(x.get("id")) != str(item_id)]
 
-# --- AI解析エンジン ---
+# --- AI解析エンジン（Gemini 3.6 Flash） ---
 def analyze_master_intelligence(name, url, genre, raw_text=""):
     if not gemini_key:
         st.error("GEMINI_API_KEY が設定されていません。Secretsを確認してください。")
@@ -65,25 +80,25 @@ def analyze_master_intelligence(name, url, genre, raw_text=""):
         today_str = datetime.date.today().strftime("%Y-%m-%d")
         
         prompt = f"""
-本日は {today_str} です。あなたは限定品（ソフビ、TCG、プレバン限定品）の専門アナリストです。
-提供された情報から相場・定価・スケジュールを推計し、必ず以下の純粋なJSONのみを出力してください（Markdown記法は不要）。
+本日は {today_str} です。あなたは限定アイテム（ソフビ、TCG、プレバン限定品、スニーカー、ホビー）の専門アナリストです。
+提供された情報から、商品名・定価推計・現在市場相場・抽選締切日・当選発表日を推計し、必ず以下の純粋なJSONのみを出力してください（Markdownのバッククォート記法は不要）。
 
-【対象】
-- 名称/タイトル: {name}
-- URL: {url}
+【対象情報】
+- 記事/タイトル: {name}
+- 参照URL: {url}
 - ジャンル: {genre}
-- 告知文: {raw_text}
+- 本文抜粋: {raw_text[:400]}
 
 【必須JSONフォーマット】
 {{
-  "name": "商品名・タイトル",
-  "url": "公式受付URL（不明なら推測URLまたは https://google.com）",
-  "retail_price": 5000,
+  "name": "商品名（簡潔に）",
+  "url": "{url}",
+  "retail_price": 5500,
   "market_price": 12000,
   "deadline_date": "{today_str}",
   "result_date": "{today_str}",
   "difficulty": "★★★☆☆",
-  "market_trend": "高需要・定価超え推移"
+  "market_trend": "高需要・即完売見込み"
 }}
 """
         response = client.models.generate_content(
@@ -100,24 +115,54 @@ def analyze_master_intelligence(name, url, genre, raw_text=""):
         data["sns_genre"] = genre
         return data
     except Exception as e:
-        st.error(f"AI解析エラー詳細: {e}")
         return None
+
+# --- 本格巡回クローラー（動的RSS・ニュースフィード） ---
+def fetch_patrol_targets():
+    targets = []
+    
+    # Google News RSS (検索キーワードベースで最新の予約・抽選記事を抽出)
+    queries = [
+        ("ワンピースカード 抽選予約", "TCG・トレカ"),
+        ("ポケモンカード 抽選予約", "TCG・トレカ"),
+        ("プレミアムバンダイ 受注開始", "プレバン限定"),
+        ("限定 ソフビ 抽選", "ソフビ・ホビー"),
+        ("スニダン 当選 スニーカー", "スニーカー")
+    ]
+    
+    headers = {"User-Agent": "Mozilla/5.0"}
+    for q, genre in queries:
+        encoded_q = urllib.parse.quote(q)
+        feed_url = f"https://news.google.com/rss/search?q={encoded_q}&hl=ja&gl=JP&ceid=JP:ja"
+        feed = feedparser.parse(feed_url)
+        for entry in feed.entries[:3]:  # 各ジャンル最新3件
+            targets.append({
+                "name": entry.title,
+                "url": entry.link,
+                "genre": genre,
+                "summary": getattr(entry, "summary", entry.title),
+                "source_type": "自動巡回(ニュース)"
+            })
+            
+    return targets
 
 # --- UIメイン ---
 st.title("⚡ 自律巡回＆定価自衛ボード")
 
 # 1. 自動巡回実行ボタン
 if st.button("🔄 全自動マスター巡回", use_container_width=True):
-    with st.spinner("情報スキャン＆AI解析中..."):
-        sample_hits = [
-            {"name": "ワンピースカード 新時代の主役 BOX", "url": "https://www.onepiece-cardgame.com/", "genre": "TCG・トレカ", "type": "公式巡回"},
-            {"name": "墓場の画廊限定 ソフビ怪獣シリーズ", "url": "https://store.hakabanogarou.jp/", "genre": "ソフビ・ホビー", "type": "公式巡回"}
-        ]
-        new_count = 0
+    with st.spinner("WEB速報・RSSをクロールしてAI解析中..."):
         existing_urls = [x.get("url") for x in load_db()]
-        for h in sample_hits:
+        crawler_hits = fetch_patrol_targets()
+        
+        new_count = 0
+        progress_bar = st.progress(0)
+        total = len(crawler_hits)
+        
+        for idx, h in enumerate(crawler_hits):
+            progress_bar.progress((idx + 1) / total)
             if h["url"] not in existing_urls:
-                parsed = analyze_master_intelligence(h["name"], h["url"], h["genre"], raw_text="公式事前抽選受付")
+                parsed = analyze_master_intelligence(h["name"], h["url"], h["genre"], raw_text=h["summary"])
                 if parsed:
                     f_retail = int(parsed.get("retail_price", 0))
                     f_market = int(parsed.get("market_price", 0))
@@ -141,21 +186,23 @@ if st.button("🔄 全自動マスター巡回", use_container_width=True):
                         "difficulty": parsed["difficulty"],
                         "market_trend": parsed["market_trend"],
                         "sns_genre": parsed["sns_genre"],
-                        "source_type": h["type"]
+                        "source_type": h["source_type"]
                     }
                     save_to_db(record)
                     new_count += 1
+                    
+        progress_bar.empty()
         if new_count > 0:
-            st.success(f"新たに {new_count} 件を自動取得・AI解析しました！")
+            st.success(f"最新の速報から {new_count} 件を自動取得・AI解析しました！")
             st.rerun()
         else:
-            st.info("すべての案件は取得済みです。")
+            st.info("新規の未登録案件は見つかりませんでした（最新状態です）。")
 
 # 2. 手動投入
-with st.expander("📥 Xポストや個別URLを手動で投入する", expanded=True):
+with st.expander("📥 Xポストや個別URLを手動で投入する", expanded=False):
     in_url = st.text_input("公式/告知URL", placeholder="https://...")
-    in_post = st.text_area("Xのポスト文 または 告知本文（コピペ）", placeholder="【公式】ワンピースカード新弾 抽選受付開始...", height=80)
-    in_genre = st.selectbox("ジャンル指定", ["TCG・トレカ", "ソフビ・ホビー", "プレバン限定", "Supreme・ストリート"])
+    in_post = st.text_area("Xのポスト文 または 告知本文（コピペ）", placeholder="【公式】抽選受付開始...", height=80)
+    in_genre = st.selectbox("ジャンル指定", ["TCG・トレカ", "ソフビ・ホビー", "プレバン限定", "スニーカー", "その他"])
     
     if st.button("🪄 AI解析してリストに追加", use_container_width=True):
         if not in_url and not in_post:
@@ -187,7 +234,7 @@ with st.expander("📥 Xポストや個別URLを手動で投入する", expanded
                         "difficulty": parsed["difficulty"],
                         "market_trend": parsed["market_trend"],
                         "sns_genre": parsed["sns_genre"],
-                        "source_type": "手動/X投入"
+                        "source_type": "手動投入"
                     }
                     save_to_db(record)
                     st.success(f"「{parsed['name']}」を追加しました！")
@@ -200,14 +247,14 @@ items = load_db()
 st.subheader(f"📋 監視中案件（{len(items)} 件）")
 
 if not items:
-    st.info("監視中の案件はありません。")
+    st.info("監視中の案件はありません。「全自動マスター巡回」を実行してください。")
 else:
     for item in items:
         with st.container():
             c1, c2 = st.columns([5, 1])
             with c1:
                 st.markdown(f"### {item['name']}")
-                st.caption(f"ジャンル: {item.get('sns_genre')} ｜ 締切: {item.get('deadline_date')}")
+                st.caption(f"ジャンル: {item.get('sns_genre')} ｜ 締切日: {item.get('deadline_date')} ｜ 取得元: {item.get('source_type')}")
             with c2:
                 if st.button("🗑️", key=f"del_{item['id']}"):
                     delete_from_db(item["id"])
@@ -226,5 +273,5 @@ else:
             sc1.link_button("スニダンで相場確認", f"https://snkrdunk.com/search?keywords={kw}", use_container_width=True)
             sc2.link_button("メルカリで確認", f"https://jp.mercari.com/search?keyword={kw}", use_container_width=True)
             
-            st.link_button("🔗 公式受付ページへ行く", item.get("url", "https://google.com"), use_container_width=True)
+            st.link_button("🔗 公式・速報ページへ行く", item.get("url", "https://google.com"), use_container_width=True)
             st.markdown("---")
