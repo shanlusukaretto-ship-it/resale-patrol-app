@@ -70,10 +70,11 @@ def get_links(name, genre, dl):
             {"site_name": "あみあみ（予約抽選）", "url": f"https://www.amiami.jp/top/page/c/search.html?s_keywords={enc}", "deadline_date": dl},
             {"site_name": "ヨドバシ・ドット・コム", "url": f"https://www.yodobashi.com/?word={enc}", "deadline_date": dl}
         ]
-    elif any(k in g for k in ["釣具", "ルアー", "DRT", "リール"]):
+    elif any(k in g for k in ["釣具", "ルアー", "DRT", "リール", "タイニークラッシュ"]):
         return [
-            {"site_name": "バックラッシュ（DRT・抽選）", "url": f"https://www.backlash.co.jp/item_list/?kw={enc}", "deadline_date": dl},
-            {"site_name": "キャスティング オンライン", "url": f"https://store.castingnet.jp/shop/goods/search.aspx?keyword={enc}", "deadline_date": dl}
+            {"site_name": "バックラッシュ公式", "url": f"https://www.backlash.co.jp/item_list/?kw={enc}", "deadline_date": dl},
+            {"site_name": "キャスティング オンライン", "url": f"https://store.castingnet.jp/shop/goods/search.aspx?keyword={enc}", "deadline_date": dl},
+            {"site_name": "釣具 アメブロ入荷検索", "url": f"https://search.ameba.jp/search/entry/{enc}.html", "deadline_date": dl}
         ]
     elif any(k in g for k in ["キャンプ", "アウトドア", "ガレージブランド"]):
         return [
@@ -108,11 +109,15 @@ def get_links(name, genre, dl):
 
 def analyze_ai(name, url, genre, raw):
     if not gemini_key: return None
+    # 自動車・バイク・車両関連の除外判定
+    bad_words = ["車", "自動車", "バイク", "タイヤ", "ホイール", "オートバイ", "カーナビ", "走行"]
+    if any(bw in name or bw in raw for bw in bad_words):
+        return None
     try:
         c = genai.Client(api_key=gemini_key)
         today = datetime.date.today().strftime("%Y-%m-%d")
         dl = (datetime.date.today() + datetime.timedelta(days=7)).strftime("%Y-%m-%d")
-        p = f"本日は{today}。限定品・極小生産品（釣具・キャンプ・カメラ・TCG・海外高騰等）のアナリストとして定価(仕入目安),予想相場(二次流通),受付元をJSON出力。価格数値のみ。対象:{name},{url},{genre},{raw[:350]}。形式:{{\"standard_name\":\"商品名\",\"retail_price\":5000,\"market_price\":15000,\"deadline\":\"{dl}\",\"genre\":\"{genre}\",\"sites\":[{{\"site_name\":\"受付/情報元\",\"url\":\"{url}\",\"deadline\":\"{dl}\"}}]}}"
+        p = f"本日は{today}。限定品・極小生産品（釣具・キャンプ・カメラ・TCG・ホビー・海外高騰等）のアナリストとして定価(仕入目安),予想相場(二次流通),受付元をJSON出力。自動車やバイク関連は絶対に除外。価格数値のみ。対象:{name},{url},{genre},{raw[:350]}。形式:{{\"standard_name\":\"商品名\",\"retail_price\":5000,\"market_price\":15000,\"deadline\":\"{dl}\",\"genre\":\"{genre}\",\"sites\":[{{\"site_name\":\"受付/情報元\",\"url\":\"{url}\",\"deadline\":\"{dl}\"}}]}}"
         res = c.models.generate_content(model="gemini-3.6-flash", contents=p)
         txt = res.text.strip().replace("```json","").replace("```","").strip()
         return json.loads(txt)
@@ -120,7 +125,10 @@ def analyze_ai(name, url, genre, raw):
 
 def fetch_rss():
     hits = []
+    # 釣具（アメブロ・入荷検索含め強化）および車完全除外の巡回クエリ
     qs = [
+        ("site:ameblo.jp タイニークラッシュ 抽選 入荷", "釣具"),
+        ("site:ameblo.jp DRT 抽選 販売", "釣具"),
         ("DRT タイニークラッシュ 抽選 予約", "釣具"),
         ("カーペンター ルアー 抽選 販売", "釣具"),
         ("ガレージブランド キャンプ 抽選 限定", "キャンプ"),
@@ -242,7 +250,6 @@ with col_sort:
         ["更新順", "新着順", "利益額が高い順", "利益率が高い順", "予想相場が高い順", "締切が近い順"]
     )
 
-# 絞り込み処理
 filtered_items = []
 target_genre_key = sel_genre_raw.split()[-1] if sel_genre_raw != "すべて" else None
 
@@ -258,7 +265,6 @@ for it in norm_items:
         if not any(s.get("status") == "応募中" for s in it.get("sites", [])): continue
     filtered_items.append(it)
 
-# ソート処理
 if sort_mode == "利益額が高い順":
     filtered_items.sort(key=lambda x: x.get("profit", 0), reverse=True)
 elif sort_mode == "利益率が高い順":
@@ -282,13 +288,9 @@ for item in filtered_items:
     badge = "【応募中あり】" if has_app else ""
     prof_val = item.get('profit', 0)
     
-    # 利益額に応じた視覚アイコン（🔥/💰）
-    if prof_val >= 50000:
-        prof_icon = "🔥 "
-    elif prof_val >= 10000:
-        prof_icon = "💰 "
-    else:
-        prof_icon = ""
+    if prof_val >= 50000: prof_icon = "🔥 "
+    elif prof_val >= 10000: prof_icon = "💰 "
+    else: prof_icon = ""
     
     p_disp = f"{prof_icon}+{prof_val:,}円" if prof_val else ""
     g_icon = get_genre_icon(item.get('sns_genre', ''))
