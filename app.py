@@ -22,6 +22,14 @@ def parse_num(v, d):
     c = re.sub(r"[^\d]", "", str(v)) if v else ""
     return int(c) if c else d
 
+def parse_date_safe(val, default_date):
+    if not val: return default_date
+    try:
+        s = str(val)[:10]
+        return dt.datetime.strptime(s, "%Y-%m-%d").date()
+    except:
+        return default_date
+
 def load_db():
     if sb:
         try: return sb.table("items").select("*").order("id", desc=True).execute().data
@@ -100,7 +108,11 @@ with c1:
     if st.button("🔄 最新情報を高速巡回", use_container_width=True):
         pt, pb = st.empty(), st.progress(0)
         hits, all_it = fetch_rss(), load_db()
-        c_map = {x.get("url"): dt.datetime.strptime(x.get("updated_at", today), "%Y-%m-%d").date() for x in all_it if x.get("url")}
+        
+        # 安全な日付パースでエラーを防止
+        default_old = today_d - dt.timedelta(days=10)
+        c_map = {x.get("url"): parse_date_safe(x.get("updated_at") or x.get("created_at"), default_old) for x in all_it if x.get("url")}
+        
         new_h = [h for h in hits if h["url"] not in c_map or (today_d - c_map[h["url"]]).days >= 3]
         total, done = len(new_h) or 1, 0
         with ThreadPoolExecutor(max_workers=4) as ex:
@@ -204,8 +216,7 @@ for item in fil_items:
                 cs_st, cs_dt = st.columns(2)
                 cur_st = s.get("status", "未応募")
                 nst = cs_st.selectbox("状況", ["未応募", "応募中", "当選", "落選"], index=["未応募", "応募中", "当選", "落選"].index(cur_st) if cur_st in ["未応募", "応募中", "当選", "落選"] else 0, key=f"s_{item['id']}_{idx}")
-                try: d_val = dt.datetime.strptime(s.get("deadline_date", def_dl), "%Y-%m-%d").date()
-                except: d_val = dt.date.today()
+                d_val = parse_date_safe(s.get("deadline_date"), today_d)
                 nd = cs_dt.date_input("締切", value=d_val, key=f"dt_{item['id']}_{idx}").strftime("%Y-%m-%d")
                 if nst != cur_st or nd != s.get("deadline_date"):
                     s["status"], s["deadline_date"], s["updated_at"] = nst, nd, today
