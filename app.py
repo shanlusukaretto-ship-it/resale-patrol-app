@@ -1,4 +1,4 @@
-import streamlit as st, datetime, urllib.parse, json, time, feedparser
+import streamlit as st, datetime, urllib.parse, json, time, feedparser, re
 from google import genai
 from supabase import create_client, Client
 
@@ -14,6 +14,11 @@ if sb_url and sb_key:
     except: pass
 
 if "items" not in st.session_state: st.session_state.items = []
+
+def parse_num(val, default):
+    if not val: return default
+    cleaned = re.sub(r"[^\d]", "", str(val))
+    return int(cleaned) if cleaned else default
 
 def load_db():
     if supabase:
@@ -64,7 +69,7 @@ def analyze_ai(name, url, genre, raw):
         c = genai.Client(api_key=gemini_key)
         today = datetime.date.today().strftime("%Y-%m-%d")
         dl = (datetime.date.today() + datetime.timedelta(days=7)).strftime("%Y-%m-%d")
-        p = f"本日は{today}。限定品の定価,相場,受付先をJSON出力。曖昧文字列禁止。対象:{name},{url},{genre},{raw[:300]}。フォーマット:{{\"standard_name\":\"商品名\",\"retail_price\":5000,\"market_price\":12000,\"deadline\":\"{dl}\",\"sites\":[{{\"site_name\":\"受付元\",\"url\":\"{url}\",\"deadline\":\"{dl}\"}}]}}"
+        p = f"本日は{today}。限定品の定価,相場,受付先をJSON出力。価格は数値のみ。対象:{name},{url},{genre},{raw[:300]}。フォーマット:{{\"standard_name\":\"商品名\",\"retail_price\":5000,\"market_price\":12000,\"deadline\":\"{dl}\",\"sites\":[{{\"site_name\":\"受付元\",\"url\":\"{url}\",\"deadline\":\"{dl}\"}}]}}"
         res = c.models.generate_content(model="gemini-3.6-flash", contents=p)
         txt = res.text.strip().replace("```json","").replace("```","").strip()
         return json.loads(txt)
@@ -98,11 +103,14 @@ with c1:
             d = analyze_ai(h["name"], h["url"], h["genre"], h["summary"])
             if d:
                 p_name = d.get("standard_name") or h["name"][:25]
-                ret, mkt = int(d.get("retail_price", 5000)), int(d.get("market_price", 10000))
+                ret = parse_num(d.get("retail_price"), 5000)
+                mkt = parse_num(d.get("market_price"), 10000)
                 prof = mkt - int(mkt * 0.1) - 750 - ret
                 margin = round((prof / mkt) * 100, 1) if mkt > 0 else 0
-                main_dl = d.get("deadline", def_dl)
-                sites = [{"site_name": s.get("site_name","公式"), "url": s.get("url") or h["url"], "created_at": today, "updated_at": today, "deadline_date": s.get("deadline", main_dl), "status": "未応募"} for s in d.get("sites", [])]
+                main_dl = d.get("deadline") or def_dl
+                
+                raw_s = d.get("sites") if isinstance(d.get("sites"), list) else []
+                sites = [{"site_name": s.get("site_name","公式"), "url": s.get("url") or h["url"], "created_at": today, "updated_at": today, "deadline_date": s.get("deadline", main_dl), "status": "未応募"} for s in raw_s]
                 for l in get_links(p_name, h["genre"], main_dl):
                     if not any(x["site_name"] == l["site_name"] for x in sites):
                         sites.append({"site_name": l["site_name"], "url": l["url"], "created_at": today, "updated_at": today, "deadline_date": l["deadline_date"], "status": "未応募"})
@@ -110,7 +118,9 @@ with c1:
                 matched = next((x for x in all_it if p_name in x.get("name","") or x.get("name","") in p_name), None)
                 if matched:
                     cs = matched.get("sites") or []
-                    if isinstance(cs, str): cs = json.loads(cs)
+                    if isinstance(cs, str): 
+                        try: cs = json.loads(cs)
+                        except: cs = []
                     names = [x.get("site_name") for x in cs]
                     for s in sites:
                         if s["site_name"] not in names: cs.append(s)
