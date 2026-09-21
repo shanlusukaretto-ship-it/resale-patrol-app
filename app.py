@@ -14,39 +14,14 @@ st.set_page_config(
     initial_sidebar_state="collapsed"
 )
 
-# スタイル定義
-st.markdown("""
-<style>
-    .badge-applying {
-        background-color: #ff4b4b;
-        color: white;
-        padding: 3px 8px;
-        border-radius: 6px;
-        font-weight: bold;
-        font-size: 0.8rem;
-        margin-left: 8px;
-    }
-    .badge-genre {
-        background-color: #f1f5f9;
-        color: #475569;
-        font-size: 0.75rem;
-        padding: 3px 8px;
-        border-radius: 6px;
-        font-weight: 600;
-    }
-    .site-card {
-        background-color: #f8fafc;
-        border: 1px solid #e2e8f0;
-        border-radius: 8px;
-        padding: 12px;
-        margin-bottom: 8px;
-    }
-    .date-text {
-        font-size: 0.8rem;
-        color: #64748b;
-    }
-</style>
-""", unsafe_allow_html=True)
+# スタイル定義（三重クォート不使用）
+custom_css = "<style>"
+custom_css += ".badge-applying { background-color: #ff4b4b; color: white; padding: 3px 8px; border-radius: 6px; font-weight: bold; font-size: 0.8rem; margin-left: 8px; }"
+custom_css += ".badge-genre { background-color: #f1f5f9; color: #475569; font-size: 0.75rem; padding: 3px 8px; border-radius: 6px; font-weight: 600; }"
+custom_css += ".site-card { background-color: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 12px; margin-bottom: 8px; }"
+custom_css += ".date-text { font-size: 0.8rem; color: #64748b; }"
+custom_css += "</style>"
+st.markdown(custom_css, unsafe_allow_html=True)
 
 # --- 設定管理 ---
 gemini_key = st.secrets.get("GEMINI_API_KEY", "")
@@ -97,7 +72,7 @@ def delete_from_db(item_id):
             pass
     st.session_state.monitored_items = [x for x in st.session_state.monitored_items if str(x.get("id")) != str(item_id)]
 
-# 主要ショップの検索リンク補完ジェネレーター
+# 主要ショップ補完
 def get_default_platform_links(item_name, genre, base_deadline):
     encoded = urllib.parse.quote(item_name)
     links = []
@@ -134,35 +109,17 @@ def analyze_master_intelligence(name, url, genre, raw_text=""):
         today_str = today.strftime("%Y-%m-%d")
         default_deadline = (today + datetime.timedelta(days=7)).strftime("%Y-%m-%d")
         
-        prompt = f"""
-本日は {today_str} です。限定アイテム（TCG・ソフビ・プレバン・ホビー・スニーカー）の専門アナリストとして情報解析を行ってください。
-情報から「統一された正式商品名」「定価」「予想相場」および、本文に記載されている【すべての応募・予約受付サイトや店舗、それぞれの締切日（YYYY-MM-DD形式）】を抽出してください。
-本文中に明確な締切日がない場合は、受付開始から概ね1週間後の日付（例: {default_deadline}）を推計して設定してください。「随時更新」などの曖昧な文字列は禁止し、必ず YYYY-MM-DD 形式の日付にしてください。
-必ず以下の純粋なJSONフォーマットのみを出力してください。
+        prompt_lines = [
+            f"本日は {today_str} です。限定アイテム（TCG・ソフビ・プレバン・ホビー・スニーカー）の専門アナリストとして情報解析を行ってください。",
+            "情報から「統一された正式商品名」「定価」「予想相場」および、本文に記載されている【すべての応募・予約受付サイトや店舗、それぞれの締切日（YYYY-MM-DD形式）】を抽出してください。",
+            f"本文中に明確な締切日がない場合は、受付開始から概ね1週間後の日付（例: {default_deadline}）を推計して設定してください。「随時更新」などの曖昧な文字列は禁止し、必ず YYYY-MM-DD 形式の日付にしてください。",
+            "必ず以下の純粋なJSONフォーマットのみを出力してください。",
+            f"【対象】 タイトル: {name} / URL: {url} / ジャンル: {genre} / 本文: {raw_text[:600]}",
+            "【JSONフォーマット】",
+            "{\"standard_name\": \"商品名\", \"retail_price\": 5500, \"market_price\": 12000, \"estimated_deadline\": \"" + default_deadline + "\", \"rating\": \"S\", \"comment\": \"注目案件\", \"extracted_sites\": [{\"site_name\": \"店舗名\", \"url\": \"" + url + "\", \"deadline_date\": \"" + default_deadline + "\"}]}"
+        ]
+        prompt = "\n".join(prompt_lines)
 
-【対象】
-- タイトル: {name}
-- 参照URL: {url}
-- ジャンル: {genre}
-- 本文: {raw_text[:600]}
-
-【JSONフォーマット】
-{{
-  "standard_name": "商品名（統一名称・25文字以内）",
-  "retail_price": 5500,
-  "market_price": 12000,
-  "estimated_deadline": "{default_deadline}",
-  "rating": "S",
-  "comment": "注目案件・即完売必至",
-  "extracted_sites": [
-    {{
-      "site_name": "店舗名・サイト名",
-      "url": "{url}",
-      "deadline_date": "{default_deadline}"
-    }}
-  ]
-}}
-"""
         response = client.models.generate_content(
             model="gemini-3.6-flash",
             contents=prompt
@@ -481,9 +438,9 @@ else:
             for s_idx, s in enumerate(sites_list):
                 with st.container():
                     site_target_url = s.get("url") if s.get("url") else "https://google.com"
-                    st.markdown(f"""
-                    <div class='site-card'>
-                        <strong>🔗 {s.get('site_name', '受付サイト')}</strong><br>
-                        <span class='date-text'>初回記載日: {s.get('created_at', '-')} ｜ 更新日: {s.get('updated_at', '-')} ｜ 締切日: <b>{s.get('deadline_date', '未設定')}</b></span>
-                    </div>
-       
+                    s_name = s.get("site_name", "受付サイト")
+                    s_c_at = s.get("created_at", "-")
+                    s_u_at = s.get("updated_at", "-")
+                    s_d_at = s.get("deadline_date", "未設定")
+
+                    card_html = f"<div class='site-card'><strong>🔗 {s_name}</strong><br><span class='dat
