@@ -3,7 +3,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from google import genai
 from supabase import create_client, Client
 
-st.set_page_config(page_title="プレミア商品確認ツール", page_icon="📦", layout="wide")
+st.set_page_config(page_title="プレ値パトロール", page_icon="🎯", layout="wide")
 
 gemini_key = st.secrets.get("GEMINI_API_KEY", "")
 sb_url = st.secrets.get("SUPABASE_URL", "")
@@ -148,17 +148,48 @@ def fetch_rss():
             hits.append({"name": e.title, "url": e.link, "genre": g, "summary": getattr(e, "summary", "")})
     return hits
 
-st.title("プレミア商品確認ツール")
-c1, c2 = st.columns([1, 1])
+# --- メイン画面 ---
+st.title("🎯 プレ値パトロール")
 
+items = load_db()
+today_date = datetime.date.today()
+today = today_date.strftime("%Y-%m-%d")
+def_dl = (today_date + datetime.timedelta(days=7)).strftime("%Y-%m-%d")
+
+# サイト情報の正規化
+norm_items = []
+for it in items:
+    s = it.get("sites")
+    if isinstance(s, str):
+        try: s = json.loads(s)
+        except: s = []
+    if not s:
+        s = [{"site_name": "情報元", "url": it.get("url","https://google.com"), "created_at": it.get("created_at", today), "updated_at": it.get("updated_at", today), "deadline_date": def_dl, "status": "未応募"}]
+        for l in get_links(it.get("name",""), it.get("sns_genre",""), def_dl):
+            s.append({"site_name": l["site_name"], "url": l["url"], "created_at": today, "updated_at": today, "deadline_date": def_dl, "status": "未応募"})
+        update_db(it["id"], {"sites": s})
+    it["sites"] = s
+    norm_items.append(it)
+
+# --- サマリー統計（ダッシュボード） ---
+total_cnt = len(norm_items)
+app_cnt = sum(1 for x in norm_items if any(s.get("status") == "応募中" for s in x.get("sites", [])))
+total_prof = sum(x.get("profit", 0) for x in norm_items if x.get("profit", 0) > 0)
+
+s1, s2, s3 = st.columns(3)
+s1.metric("監視アイテム", f"{total_cnt} 件")
+s2.metric("応募中", f"{app_cnt} 件")
+s3.metric("総見込利益", f"¥{total_prof:,}")
+
+st.write("")
+
+# 操作エリア
+c1, c2 = st.columns([1, 1])
 with c1:
-    if st.button("🔄 全自動で最新情報を巡回収集", use_container_width=True):
+    if st.button("🔄 最新情報を高速巡回", use_container_width=True):
         p_text, p_bar = st.empty(), st.progress(0)
         hits = fetch_rss()
         all_it = load_db()
-        today_date = datetime.date.today()
-        today = today_date.strftime("%Y-%m-%d")
-        def_dl = (today_date + datetime.timedelta(days=7)).strftime("%Y-%m-%d")
         
         cached_info = {}
         for x in all_it:
@@ -222,19 +253,17 @@ with c1:
                         all_it.append(rec)
                         
         p_bar.empty(); p_text.empty()
-        st.success("高速巡回が完了しました！")
+        st.success("巡回が完了しました！")
         st.rerun()
 
 with c2:
-    with st.popover("➕ 手動追加"):
+    with st.popover("➕ 手動登録"):
         in_n = st.text_input("商品名")
         in_u = st.text_input("URL")
         in_g = st.selectbox("ジャンル", ["TCG", "プレバン", "スニーカー", "ホビー", "ソフビ", "釣具", "海外相場", "カメラ", "キャンプ", "その他"])
-        if st.button("登録", use_container_width=True):
-            today = datetime.date.today().strftime("%Y-%m-%d")
-            dl = (datetime.date.today() + datetime.timedelta(days=7)).strftime("%Y-%m-%d")
-            sites = [{"site_name": "指定URL", "url": in_u or "https://google.com", "created_at": today, "updated_at": today, "deadline_date": dl, "status": "未応募"}]
-            for l in get_links(in_n or "手動商品", in_g, dl): sites.append({"site_name": l["site_name"], "url": l["url"], "created_at": today, "updated_at": today, "deadline_date": dl, "status": "未応募"})
+        if st.button("登録する", use_container_width=True):
+            sites = [{"site_name": "指定URL", "url": in_u or "https://google.com", "created_at": today, "updated_at": today, "deadline_date": def_dl, "status": "未応募"}]
+            for l in get_links(in_n or "手動商品", in_g, def_dl): sites.append({"site_name": l["site_name"], "url": l["url"], "created_at": today, "updated_at": today, "deadline_date": def_dl, "status": "未応募"})
             rec = {"id": str(int(time.time()*1000)), "name": in_n or "手動商品", "url": in_u or "https://google.com", "retail_price": 5000, "market_price": 15000, "profit": 7750, "margin_rate": 51.7, "break_even": 6388, "sns_genre": in_g, "created_at": today, "updated_at": today, "sites": sites}
             save_db(rec)
             st.success("登録完了！")
@@ -242,30 +271,12 @@ with c2:
 
 st.markdown("---")
 
-items = load_db()
-today = datetime.date.today().strftime("%Y-%m-%d")
-def_dl = (datetime.date.today() + datetime.timedelta(days=7)).strftime("%Y-%m-%d")
-
-norm_items = []
-for it in items:
-    s = it.get("sites")
-    if isinstance(s, str):
-        try: s = json.loads(s)
-        except: s = []
-    if not s:
-        s = [{"site_name": "情報元", "url": it.get("url","https://google.com"), "created_at": it.get("created_at", today), "updated_at": it.get("updated_at", today), "deadline_date": def_dl, "status": "未応募"}]
-        for l in get_links(it.get("name",""), it.get("sns_genre",""), def_dl):
-            s.append({"site_name": l["site_name"], "url": l["url"], "created_at": today, "updated_at": today, "deadline_date": def_dl, "status": "未応募"})
-        update_db(it["id"], {"sites": s})
-    it["sites"] = s
-    norm_items.append(it)
-
+# 絞り込み & ソートバー
 col_filt, col_sort = st.columns([1, 1])
 with col_filt:
     genre_options = ["すべて", "🃏 TCG", "🤖 プレバン", "👟 スニーカー", "🧸 ホビー/ソフビ", "🎣 釣具", "🌎 海外相場", "📷 カメラ", "⛺ キャンプ"]
     sel_genre_raw = st.selectbox("ジャンル絞り込み", genre_options)
-    app_count = sum(1 for x in norm_items if any(s.get("status") == "応募中" for s in x.get("sites", [])))
-    f_app = st.checkbox(f"【応募中】がある商品のみ（現在: {app_count} 件）")
+    f_app = st.checkbox(f"【応募中】のみ表示（{app_cnt}件）")
 
 with col_sort:
     sort_mode = st.selectbox("並び替え", ["更新順", "新着順", "利益額が高い順", "利益率が高い順", "予想相場が高い順", "締切が近い順"])
@@ -294,10 +305,11 @@ elif sort_mode == "締切が近い順":
 elif sort_mode == "新着順": filtered_items.sort(key=lambda x: str(x.get("id", "")), reverse=True)
 else: filtered_items.sort(key=lambda x: str(x.get("updated_at", "")), reverse=True)
 
+# 商品一覧リスト
 for item in filtered_items:
     sites = item.get("sites", [])
     has_app = any(s.get("status") == "応募中" for s in sites)
-    badge = "【応募中あり】" if has_app else ""
+    badge = "【応募中】" if has_app else ""
     prof_val = item.get('profit', 0)
     
     if prof_val >= 50000: prof_icon = "🔥 "
@@ -309,11 +321,10 @@ for item in filtered_items:
     
     with st.expander(f"{g_icon} {item.get('name','')} {p_disp} {badge}"):
         ci, cr, cd = st.columns([4, 1.2, 0.8])
-        ci.caption(f"ジャンル: {item.get('sns_genre','')} | 更新: {item.get('updated_at','-')}")
+        ci.caption(f"ジャンル: {item.get('sns_genre','')} | 最終更新: {item.get('updated_at','-')}")
         
-        # 個別商品の最新相場・情報再取得ボタン
         if cr.button("🔄 再取得", key=f"r_{item['id']}", use_container_width=True):
-            with st.spinner("最新相場を取得中..."):
+            with st.spinner("相場を更新中..."):
                 d = call_gemini(item.get("name",""), item.get("url",""), item.get("sns_genre",""), "")
                 if d and isinstance(d, dict):
                     ret = parse_num(d.get("retail_price"), item.get("retail_price", 5000))
@@ -321,39 +332,43 @@ for item in filtered_items:
                     prof = mkt - int(mkt * 0.1) - 750 - ret
                     margin = round((prof / mkt) * 100, 1) if mkt > 0 else 0
                     update_db(item["id"], {"retail_price": ret, "market_price": mkt, "profit": prof, "margin_rate": margin, "break_even": int((ret+750)/0.9), "updated_at": today})
-                    st.success("相場を更新しました！")
-                    time.sleep(0.5)
+                    st.success("相場更新完了")
+                    time.sleep(0.4)
                     st.rerun()
                 else:
-                    st.warning("相場情報の再取得に失敗しました")
+                    st.warning("再取得失敗")
                     
         if cd.button("削除", key=f"d_{item['id']}", use_container_width=True):
             del_db(item["id"])
             st.rerun()
             
-        m1, m2, m3, m4 = st.columns(4)
-        m1.metric("定価/仕入", f"¥{item.get('retail_price',0):,}")
-        m2.metric("予想相場", f"¥{item.get('market_price',0):,}")
-        m3.metric("見込利益", f"¥{item.get('profit',0):,}", f"{item.get('margin_rate',0)}%")
-        m4.metric("損益分岐", f"¥{item.get('break_even',0):,}")
+        # スマホに最適化した2x2メトリクス
+        r1_c1, r1_c2 = st.columns(2)
+        r1_c1.metric("定価/仕入", f"¥{item.get('retail_price',0):,}")
+        r1_c2.metric("予想相場", f"¥{item.get('market_price',0):,}")
         
+        r2_c1, r2_c2 = st.columns(2)
+        r2_c1.metric("見込利益", f"¥{item.get('profit',0):,}", f"{item.get('margin_rate',0)}%")
+        r2_c2.metric("損益分岐", f"¥{item.get('break_even',0):,}")
+        
+        # 相場確認ボタン
         kw = urllib.parse.quote(item.get("name",""))
         k1, k2, k3 = st.columns(3)
-        k1.link_button("👟 スニダン相場", f"https://snkrdunk.com/search?keywords={kw}", use_container_width=True)
-        k2.link_button("🔴 メルカリ相場", f"https://jp.mercari.com/search?keyword={kw}&status=sold_out", use_container_width=True)
-        k3.link_button("🇺🇸 eBay落札相場", f"https://www.ebay.com/sch/i.html?_nkw={kw}&LH_Complete=1&LH_Sold=1", use_container_width=True)
+        k1.link_button("👟 スニダン", f"https://snkrdunk.com/search?keywords={kw}", use_container_width=True)
+        k2.link_button("🔴 メルカリ", f"https://jp.mercari.com/search?keyword={kw}&status=sold_out", use_container_width=True)
+        k3.link_button("🇺🇸 eBay(Sold)", f"https://www.ebay.com/sch/i.html?_nkw={kw}&LH_Complete=1&LH_Sold=1", use_container_width=True)
         
-        st.write(f"**受付・関連サイト一覧（{len(sites)}件）**")
+        st.write(f"**受付・関連サイト（{len(sites)}件）**")
         up_flag = False
         for idx, s in enumerate(sites):
             with st.container(border=True):
                 st.write(f"🔗 **{s.get('site_name')}**")
-                st.caption(f"初回: {s.get('created_at','-')} | 更新: {s.get('updated_at','-')} | 締切: {s.get('deadline_date','未設定')}")
+                st.caption(f"更新: {s.get('updated_at','-')} | 締切: {s.get('deadline_date','未設定')}")
                 
                 cs, cd_date = st.columns(2)
                 st_list = ["未応募", "応募中", "当選", "落選"]
                 cur_st = s.get("status", "未応募")
-                nst = cs.selectbox("応募状況", st_list, index=st_list.index(cur_st) if cur_st in st_list else 0, key=f"s_{item['id']}_{idx}")
+                nst = cs.selectbox("状況", st_list, index=st_list.index(cur_st) if cur_st in st_list else 0, key=f"s_{item['id']}_{idx}")
                 if nst != cur_st:
                     s["status"] = nst
                     s["updated_at"] = today
@@ -361,14 +376,14 @@ for item in filtered_items:
                 
                 try: d_obj = datetime.datetime.strptime(s.get("deadline_date", def_dl), "%Y-%m-%d").date()
                 except: d_obj = datetime.date.today()
-                nd = cd_date.date_input("締切日", value=d_obj, key=f"dt_{item['id']}_{idx}")
+                nd = cd_date.date_input("締切", value=d_obj, key=f"dt_{item['id']}_{idx}")
                 nd_str = nd.strftime("%Y-%m-%d")
                 if nd_str != s.get("deadline_date"):
                     s["deadline_date"] = nd_str
                     s["updated_at"] = today
                     up_flag = True
                 
-                st.link_button("👉 サイトへ飛ぶ", s.get("url", "https://google.com"), use_container_width=True)
+                st.link_button("👉 サイトを開く", s.get("url", "https://google.com"), use_container_width=True)
                 
         if up_flag:
             update_db(item["id"], {"sites": sites, "updated_at": today})
