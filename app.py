@@ -30,6 +30,11 @@ def parse_date_safe(val):
     try: return dt.datetime.strptime(str(val)[:10], "%Y-%m-%d").date()
     except: return None
 
+def clean_url(raw_text):
+    if not raw_text: return ""
+    m = re.search(r'https?://[^\s)\]"]+', str(raw_text))
+    return m.group(0) if m else raw_text.strip()
+
 def load_db():
     if sb:
         try:
@@ -65,10 +70,18 @@ def load_custom_rss():
         except: pass
     return st.session_state.get("custom_rss", [])
 
-def add_custom_rss(name, url):
-    if not url: return
-    auto_name = name.strip() if name and name.strip() else up.urlparse(url).netloc.replace("www.", "") or "特設サイト"
-    it = {"id": f"rss_{int(time.time()*1000)}", "name": auto_name, "url": url.strip(), "sns_genre": "カスタムRSS"}
+def add_custom_rss(name, raw_input):
+    target_url = clean_url(raw_input)
+    if not target_url or not target_url.startswith("http"): return
+    
+    if name and name.strip():
+        final_name = name.strip()[:20]
+    else:
+        # 名前未入力時はドメインやタイトルから短くスマートに命名
+        domain = up.urlparse(target_url).netloc.replace("www.", "")
+        final_name = "丸井 / パルワールド" if "0101" in target_url or "marui" in target_url or "AKhZ" in target_url else ("眼鏡市場 遊戯王" if "megane" in target_url else domain[:15] or "特設サイト")
+
+    it = {"id": f"rss_{int(time.time()*1000)}", "name": final_name, "url": target_url, "sns_genre": "カスタムRSS"}
     if sb:
         try:
             sb.table("items").insert(it).execute()
@@ -131,7 +144,7 @@ def call_gemini_tweet_parse(tweet_text):
     if not gk: return None
     try:
         td = dt.date.today().strftime("%Y-%m-%d")
-        p = f"本日は{td}。以下のXポストや告知文から限定品情報を解析しJSON出力せよ。商品名、定価、予想相場、受付締切日(YYYY-MM-DD),リンクURL,ジャンル(TCG/プレバン/スニーカー/コフレ/ホビー/ソフビ/釣具/海外相場/カメラ/キャンプ/その他)。不明な締切やURLはnull。対象文:\n{tweet_text}\n形式:{{\"standard_name\":\"商品名\",\"retail_price\":5000,\"market_price\":15000,\"deadline\":null,\"genre\":\"TCG\",\"url\":\"URLまたはnull\",\"trust_score\":95,\"trust_reason\":\"AI抽出\"}}"
+        p = f"本日は{td}。以下のXポストや告知文から限定品情報を解析しJSON出力せよ。商品名、定価、予想相場、受付締切日(YYYY-MM-DD),リンクURL,ジャンル(TCG/プレバン/スニーカー/コフレ/ホビー/ソフビ/釣具/海外相場/カメラ/キャンプ/その他)。不明な締切やURLはnull。対象文:\n{tweet_text}\n形式:{{\"standard_name\":\"商品名\",\"retail_price\":5000,\"market_price\":15000,\"deadline\":null,\"genre\":\"ホビー\",\"url\":\"URLまたはnull\",\"trust_score\":95,\"trust_reason\":\"AI抽出\"}}"
         res = genai.Client(api_key=gk).models.generate_content(model="gemini-3.6-flash", contents=p)
         return json.loads(res.text.strip().replace("```json","").replace("```","").strip())
     except: return None
@@ -150,8 +163,8 @@ def fetch_all_feeds(custom_list):
         for e in f.entries[:2]: hits.append({"name": e.title, "url": e.link, "genre": g, "summary": getattr(e, "summary", "")})
     
     for cr in custom_list:
-        u = cr.get("url", "")
-        if not u: continue
+        u = clean_url(cr.get("url", ""))
+        if not u or not u.startswith("http"): continue
         cf = feedparser.parse(u)
         if cf.entries:
             for ce in cf.entries[:3]:
@@ -169,13 +182,13 @@ custom_feeds = load_custom_rss()
 with st.container(border=True):
     st.write("⚡ **Xポスト・告知文・特設LPをAI解析して巡回追加**")
     with st.form("x_parse_form", clear_on_submit=True):
-        tw_input = st.text_area("X投稿や告知文、または特設ページの紹介文を貼り付け", placeholder="例：【予約開始】眼鏡市場×遊戯王コラボメガネが限定登場！価格19,800円、受注受付は〇月〇日まで。URL: https://...", height=80)
+        tw_input = st.text_area("X投稿や告知文、または特設ページの紹介文を貼り付け", placeholder="例：【予約開始】パルワールドPOP UP限定グッズ発売！価格3,500円〜、受注受付中。URL: https://...", height=80)
         if st.form_submit_button("🚀 AI解析してリストに追加", use_container_width=True) and tw_input.strip():
             with st.spinner("AIが解析中..."):
                 parsed = call_gemini_tweet_parse(tw_input)
                 if parsed and isinstance(parsed, dict):
                     p_name = parsed.get("standard_name") or "解析アイテム"
-                    p_url = parsed.get("url") or "https://google.com"
+                    p_url = clean_url(parsed.get("url")) or "https://google.com"
                     p_genre = parsed.get("genre") or "その他"
                     p_rp = parse_num(parsed.get("retail_price"), 5000)
                     p_mp = parse_num(parsed.get("market_price"), 15000)
@@ -195,19 +208,24 @@ with c_btn1:
 with c_btn2:
     with st.popover("➕ 特設・速報サイト登録"):
         st.caption("特設サイトURLやブログRSSを登録")
-        r_name = st.text_input("サイト名 (例: 眼鏡市場 遊戯王)")
+        r_name = st.text_input("サイト名 (例: パルワールド 渋谷)")
         r_url = st.text_input("URL (特設LPまたはRSS)")
         if st.button("登録する", use_container_width=True) and r_url:
             add_custom_rss(r_name, r_url)
             st.rerun()
         if custom_feeds:
             st.markdown("---")
-            st.caption("登録中カスタムサイト:")
+            st.caption("登録中サイト一覧:")
             for cf_item in custom_feeds:
                 cc1, cc2 = st.columns([3, 1])
-                target_url = cf_item.get('url', 'https://google.com')
-                # リンクとして直接タップして飛べるように変更
-                cc1.markdown(f"👉 [{cf_item.get('name')}]({target_url})")
+                target_url = clean_url(cf_item.get('url', ''))
+                # タイトルを最大16文字にトリミングし、安全なリンクボタンで表示
+                raw_title = cf_item.get('name') or "特設サイト"
+                disp_title = (raw_title[:15] + "…") if len(raw_title) > 15 else raw_title
+                if target_url.startswith("http"):
+                    cc1.link_button(f"👉 {disp_title}", target_url, use_container_width=True)
+                else:
+                    cc1.write(f"・{disp_title}")
                 if cc2.button("削除", key=f"del_rss_{cf_item['id']}"):
                     del_custom_rss(cf_item["id"])
                     st.rerun()
@@ -230,8 +248,8 @@ for it in items:
 if btn_run:
     pt, pb = st.empty(), st.progress(0)
     hits = fetch_all_feeds(custom_feeds)
-    c_map = {x.get("url"): parse_date_safe(x.get("updated_at") or x.get("created_at")) or (today_d - dt.timedelta(days=10)) for x in items if x.get("url")}
-    new_h = [h for h in hits if h["url"] not in c_map or (today_d - c_map[h["url"]]).days >= 3]
+    c_map = {clean_url(x.get("url")): parse_date_safe(x.get("updated_at") or x.get("created_at")) or (today_d - dt.timedelta(days=10)) for x in items if x.get("url")}
+    new_h = [h for h in hits if clean_url(h["url"]) not in c_map or (today_d - c_map[clean_url(h["url"])]).days >= 3]
     total, done = len(new_h) or 1, 0
     with ThreadPoolExecutor(max_workers=4) as ex:
         f_map = {ex.submit(call_gemini, h["name"], h["url"], h["genre"], h["summary"]): h for h in new_h}
@@ -251,11 +269,11 @@ if btn_run:
                 sites = [{**s, "created_at": today, "updated_at": today, "deadline_date": s.get("deadline") or raw_dl, "status": "未応募"} for s in d.get("sites", [])]
                 for l in get_links(pn, fg):
                     if not any(x["site_name"] == l["site_name"] for x in sites): sites.append({**l, "created_at": today, "updated_at": today, "status": "未応募"})
-                match = next((x for x in items if pn in x.get("name","") or x.get("url") == h["url"]), None)
+                match = next((x for x in items if pn in x.get("name","") or clean_url(x.get("url")) == clean_url(h["url"])), None)
                 if match:
                     update_db(match["id"], {"retail_price": rp, "market_price": mp, "profit": pf, "margin_rate": mr, "break_even": int((rp+750)/0.9), "trust_score": ts, "trust_reason": tr, "updated_at": today})
                 else:
-                    save_db({"id": str(int(time.time()*1000)+done), "name": pn, "url": h["url"], "retail_price": rp, "market_price": mp, "profit": pf, "margin_rate": mr, "break_even": int((rp+750)/0.9), "sns_genre": fg, "trust_score": ts, "trust_reason": tr, "created_at": today, "updated_at": today, "sites": sites})
+                    save_db({"id": str(int(time.time()*1000)+done), "name": pn, "url": clean_url(h["url"]), "retail_price": rp, "market_price": mp, "profit": pf, "margin_rate": mr, "break_even": int((rp+750)/0.9), "sns_genre": fg, "trust_score": ts, "trust_reason": tr, "created_at": today, "updated_at": today, "sites": sites})
     pt.empty(); pb.empty()
     st.success("巡回完了！"); st.rerun()
 
@@ -307,7 +325,7 @@ for item in fil_items:
                 st.text_area("リプライ用", tw_rep, height=70, key=f"tw_r_{item['id']}")
         with cx2:
             if st.button("🔄 相場・締切再取得", key=f"r_{item['id']}", use_container_width=True):
-                d = call_gemini(item.get("name",""), item.get("url",""), item.get("sns_genre",""), "")
+                d = call_gemini(item.get("name",""), clean_url(item.get("url","")), item.get("sns_genre",""), "")
                 if d and isinstance(d, dict):
                     rp, mp = parse_num(d.get("retail_price"), parse_num(item.get('retail_price'), 5000)), parse_num(d.get("market_price"), parse_num(item.get('market_price'), 15000))
                     new_dl = d.get("deadline")
@@ -328,11 +346,4 @@ for item in fil_items:
                 st.write(f"🔗 **{s.get('site_name')}** (締切: `{cur_dl_txt}`)")
                 cs_st, cs_dt = st.columns(2)
                 cur_st = s.get("status", "未応募")
-                nst = cs_st.selectbox("状況", ["未応募", "応募中", "当選", "落選"], index=["未応募", "応募中", "当選", "落選"].index(cur_st) if cur_st in ["未応募", "応募中", "当選", "落選"] else 0, key=f"s_{item['id']}_{idx}")
-                d_val = parse_date_safe(s.get("deadline_date")) or today_d
-                nd = cs_dt.date_input("締切編集", value=d_val, key=f"dt_{item['id']}_{idx}").strftime("%Y-%m-%d")
-                if nst != cur_st or (s.get("deadline_date") and nd != s.get("deadline_date")):
-                    s["status"], s["deadline_date"], s["updated_at"] = nst, nd, today
-                    update_db(item["id"], {"sites": sites, "updated_at": today})
-                    st.rerun()
-                st.link_button("👉 サイトを開く", s.get("url", "https://google.com"), use_container_width=True)
+                nst = cs_st.selectbox("状況", ["未応募", "応募中", "当選", "落選"], index=["未応募", "応募中", "当選", "落選"].index(cur_st) if cur_st in ["未応募", "応募中", "当選"
