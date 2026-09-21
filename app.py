@@ -148,15 +148,14 @@ def fetch_rss():
             hits.append({"name": e.title, "url": e.link, "genre": g, "summary": getattr(e, "summary", "")})
     return hits
 
-# --- メイン画面 ---
-st.title("🎯 プレ値パトロール")
+# --- メイン画面（タイトルをコンパクトな中見出しに調整） ---
+st.subheader("🎯 プレ値パトロール")
 
 items = load_db()
 today_date = datetime.date.today()
 today = today_date.strftime("%Y-%m-%d")
 def_dl = (today_date + datetime.timedelta(days=7)).strftime("%Y-%m-%d")
 
-# サイト情報の正規化
 norm_items = []
 for it in items:
     s = it.get("sites")
@@ -170,18 +169,6 @@ for it in items:
         update_db(it["id"], {"sites": s})
     it["sites"] = s
     norm_items.append(it)
-
-# --- サマリー統計（ダッシュボード） ---
-total_cnt = len(norm_items)
-app_cnt = sum(1 for x in norm_items if any(s.get("status") == "応募中" for s in x.get("sites", [])))
-total_prof = sum(x.get("profit", 0) for x in norm_items if x.get("profit", 0) > 0)
-
-s1, s2, s3 = st.columns(3)
-s1.metric("監視アイテム", f"{total_cnt} 件")
-s2.metric("応募中", f"{app_cnt} 件")
-s3.metric("総見込利益", f"¥{total_prof:,}")
-
-st.write("")
 
 # 操作エリア
 c1, c2 = st.columns([1, 1])
@@ -276,7 +263,8 @@ col_filt, col_sort = st.columns([1, 1])
 with col_filt:
     genre_options = ["すべて", "🃏 TCG", "🤖 プレバン", "👟 スニーカー", "🧸 ホビー/ソフビ", "🎣 釣具", "🌎 海外相場", "📷 カメラ", "⛺ キャンプ"]
     sel_genre_raw = st.selectbox("ジャンル絞り込み", genre_options)
-    f_app = st.checkbox(f"【応募中】のみ表示（{app_cnt}件）")
+    app_cnt_total = sum(1 for x in norm_items if any(s.get("status") == "応募中" for s in x.get("sites", [])))
+    f_app = st.checkbox(f"【応募中】のみ表示（{app_cnt_total}件）")
 
 with col_sort:
     sort_mode = st.selectbox("並び替え", ["更新順", "新着順", "利益額が高い順", "利益率が高い順", "予想相場が高い順", "締切が近い順"])
@@ -305,7 +293,8 @@ elif sort_mode == "締切が近い順":
 elif sort_mode == "新着順": filtered_items.sort(key=lambda x: str(x.get("id", "")), reverse=True)
 else: filtered_items.sort(key=lambda x: str(x.get("updated_at", "")), reverse=True)
 
-# 商品一覧リスト
+st.caption(f"📦 表示中: **{len(filtered_items)}** 件（{sel_genre_raw}）")
+
 for item in filtered_items:
     sites = item.get("sites", [])
     has_app = any(s.get("status") == "応募中" for s in sites)
@@ -342,7 +331,6 @@ for item in filtered_items:
             del_db(item["id"])
             st.rerun()
             
-        # スマホに最適化した2x2メトリクス
         r1_c1, r1_c2 = st.columns(2)
         r1_c1.metric("定価/仕入", f"¥{item.get('retail_price',0):,}")
         r1_c2.metric("予想相場", f"¥{item.get('market_price',0):,}")
@@ -351,7 +339,6 @@ for item in filtered_items:
         r2_c1.metric("見込利益", f"¥{item.get('profit',0):,}", f"{item.get('margin_rate',0)}%")
         r2_c2.metric("損益分岐", f"¥{item.get('break_even',0):,}")
         
-        # 相場確認ボタン
         kw = urllib.parse.quote(item.get("name",""))
         k1, k2, k3 = st.columns(3)
         k1.link_button("👟 スニダン", f"https://snkrdunk.com/search?keywords={kw}", use_container_width=True)
