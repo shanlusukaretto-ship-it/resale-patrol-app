@@ -11,7 +11,6 @@ su, sk = st.secrets.get("SUPABASE_URL", ""), st.secrets.get("SUPABASE_KEY", "")
 sb = create_client(su, sk) if su and sk else None
 
 if "items_list" not in st.session_state: st.session_state.items_list = []
-if "tweet_input_text" not in st.session_state: st.session_state.tweet_input_text = ""
 
 ICONS = {"TCG":"🃏","プレバン":"🤖","スニーカー":"👟","ホビー":"🧸","ソフビ":"🧸","釣具":"🎣","海外相場":"🌎","カメラ":"📷","キャンプ":"⛺"}
 
@@ -56,7 +55,6 @@ def del_db(i_id):
         except: pass
     st.session_state.items_list = [x for x in st.session_state.items_list if str(x.get("id")) != str(i_id)]
 
-# 監視Xアカウントの永続化取得・保存
 def load_x_accounts():
     if sb:
         try:
@@ -165,7 +163,7 @@ for it in items:
     it["sites"] = s
     norm_items.append(it)
 
-tab_auto, tab_manual = st.tabs(["🎯 自動巡回リスト", "⚡ Xコピペ解析・監視"])
+tab_auto, tab_manual = st.tabs(["🎯 自動巡回リスト", "⚡ Xコピペ追加・監視設定"])
 
 def render_item_list(item_list, key_prefix=""):
     for item in item_list:
@@ -231,7 +229,7 @@ def render_item_list(item_list, key_prefix=""):
 x_acc_list = load_x_accounts()
 
 with tab_auto:
-    if st.button("🔄 最新情報を高速巡回（X監視含む）", use_container_width=True):
+    if st.button("🔄 最新情報を高速巡回（登録済み全商品を追跡）", use_container_width=True):
         pt, pb = st.empty(), st.progress(0)
         hits, all_it = fetch_rss(x_acc_list), load_db()
         c_map = {x.get("url"): parse_date_safe(x.get("updated_at") or x.get("created_at")) or (today_d - dt.timedelta(days=10)) for x in all_it if x.get("url")}
@@ -263,19 +261,18 @@ with tab_auto:
         pt.empty(); pb.empty()
         st.success("完了！"); st.rerun()
 
-    auto_items = [x for x in norm_items if not x.get("is_manual", False) and "X" not in str(x.get("trust_reason",""))]
-    st.caption(f"📦 自動巡回: **{len(auto_items)}** 件")
-    render_item_list(auto_items, "auto")
+    # 自動巡回リスト（Xコピペから追加されたものも含む）
+    st.caption(f"📦 巡回リスト: **{len(norm_items)}** 件")
+    render_item_list(norm_items, "auto")
 
 with tab_manual:
-    # 改善2: Xポスト本文の「貼り付け ➔ 即解析 ➔ 入力自動クリア」
     with st.container(border=True):
-        st.write("⚡ **Xポストを丸ごとAI解析して追加**")
+        st.write("⚡ **XポストをAI解析 ➔ 『自動巡回リスト』に直接追加**")
         with st.form("x_parse_form", clear_on_submit=True):
             tw_input = st.text_area("Xの投稿文（テキスト全体）をペースト", placeholder="【抽選開始】ポケモンカード最新弾『〇〇』受付開始！定価5,400円、締切は9月25日まで。URL: https://...", height=90)
-            submitted = st.form_submit_button("🚀 AI解析してリストに追加", use_container_width=True)
+            submitted = st.form_submit_button("🚀 AI解析して自動巡回リストに追加", use_container_width=True)
             if submitted and tw_input.strip():
-                with st.spinner("AIがポストを高速解析中..."):
+                with st.spinner("AIが解析して巡回リストに登録中..."):
                     parsed = call_gemini_tweet_parse(tw_input)
                     if parsed and isinstance(parsed, dict):
                         p_name = parsed.get("standard_name") or "X解析アイテム"
@@ -288,12 +285,29 @@ with tab_manual:
                         p_dl = parsed.get("deadline")
                         sites = [{"site_name": "X告知元/受付", "url": p_url, "created_at": today, "updated_at": today, "deadline_date": p_dl, "status": "未応募"}]
                         for l in get_links(p_name, p_genre): sites.append({**l, "created_at": today, "updated_at": today, "status": "未応募"})
-                        save_db({"id": str(int(time.time()*1000)), "name": p_name, "url": p_url, "retail_price": p_rp, "market_price": p_mp, "profit": p_pf, "margin_rate": p_mr, "break_even": int((p_rp+750)/0.9), "sns_genre": p_genre, "trust_score": 95, "trust_reason": "X速報解析", "is_manual": True, "created_at": today, "updated_at": today, "sites": sites})
-                        st.toast(f"✅ 追加完了: {p_name}")
+                        
+                        # 自動巡回リスト（norm_items）に直接合流させる
+                        save_db({
+                            "id": str(int(time.time()*1000)),
+                            "name": p_name,
+                            "url": p_url,
+                            "retail_price": p_rp,
+                            "market_price": p_mp,
+                            "profit": p_pf,
+                            "margin_rate": p_mr,
+                            "break_even": int((p_rp+750)/0.9),
+                            "sns_genre": p_genre,
+                            "trust_score": 95,
+                            "trust_reason": "X速報(巡回対象)",
+                            "is_manual": False,
+                            "created_at": today,
+                            "updated_at": today,
+                            "sites": sites
+                        })
+                        st.toast(f"✅ 自動巡回リストに追加完了: {p_name}")
                         time.sleep(0.3)
                         st.rerun()
 
-    # 改善2: 監視XアカウントのDB永続管理
     with st.expander(f"👀 巡回監視アカウント設定（登録中: {len(x_acc_list)}件）"):
         col_u1, col_u2 = st.columns([3, 1])
         new_acc = col_u1.text_input("アカウントID（例: pokecainfo）", key="acc_in")
@@ -307,7 +321,3 @@ with tab_manual:
                 if c_b.button("解除", key=f"del_acc_{acc}"):
                     del_x_account(acc)
                     st.rerun()
-
-    manual_items = [x for x in norm_items if x.get("is_manual", False) or "X" in str(x.get("trust_reason",""))]
-    st.caption(f"⭐ X速報・手動リスト: **{len(manual_items)}** 件")
-    render_item_list(manual_items, "manual")
