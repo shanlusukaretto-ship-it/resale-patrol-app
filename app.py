@@ -10,7 +10,9 @@ gk = st.secrets.get("GEMINI_API_KEY", "")
 su, sk = st.secrets.get("SUPABASE_URL", ""), st.secrets.get("SUPABASE_KEY", "")
 sb = create_client(su, sk) if su and sk else None
 
-if "items" not in st.session_state: st.session_state.items = []
+# items の初期化を厳格にリスト型として保証
+if "items" not in st.session_state or not isinstance(st.session_state.items, list):
+    st.session_state.items = []
 
 ICONS = {"TCG":"🃏","プレバン":"🤖","スニーカー":"👟","ホビー":"🧸","ソフビ":"🧸","釣具":"🎣","海外相場":"🌎","カメラ":"📷","キャンプ":"⛺"}
 
@@ -30,15 +32,19 @@ def parse_date_safe(val):
 
 def load_db():
     if sb:
-        try: return sb.table("items").select("*").order("id", desc=True).execute().data
+        try:
+            res = sb.table("items").select("*").order("id", desc=True).execute().data
+            if isinstance(res, list): return res
         except: pass
-    return st.session_state.items
+    return st.session_state.items if isinstance(st.session_state.items, list) else []
 
 def save_db(it):
     if sb:
         try: sb.table("items").insert(it).execute()
         except: pass
-    st.session_state.items.append(it)
+    if not isinstance(st.session_state.items, list):
+        st.session_state.items = []
+    st.session_state.items.insert(0, it)
 
 def update_db(i_id, data):
     if sb:
@@ -49,7 +55,8 @@ def del_db(i_id):
     if sb:
         try: sb.table("items").delete().eq("id", i_id).execute()
         except: pass
-    st.session_state.items = [x for x in st.session_state.items if str(x.get("id")) != str(i_id)]
+    if isinstance(st.session_state.items, list):
+        st.session_state.items = [x for x in st.session_state.items if str(x.get("id")) != str(i_id)]
 
 def fetch_web_text(url):
     try:
@@ -81,7 +88,7 @@ def call_gemini(n, u, g, r):
     ctx = f"{r} {body_txt}"[:1800]
     try:
         td = dt.date.today().strftime("%Y-%m-%d")
-        p = f"本日は{td}。限定品アナリストとして定価,相場,受付締切日(YYYY-MM-DD),信頼度(0-100),理由をJSON出力。締切日が本文から正確に分からない場合は絶対に推測せずnullにすること。対象:{n},{u},{g},{ctx}。形式:{{\"standard_name\":\"商品名\",\"retail_price\":5000,\"market_price\":15000,\"deadline\":null,\"genre\":\"{g}\",\"trust_score\":85,\"trust_reason\":\"本文解析済\",\"sites\":[{{\"site_name\":\"受付元\",\"url\":\"{u}\",\"deadline\":null}}]}}"
+        p = f"本日は{td}。限定品アナリストとして定価,相場,受付締切日(YYYY-MM-DD),信頼度(0-100),理由をJSON出力。締切日が本文から正確に分からない場合は絶対に推測せずnullにすること。対象:{n},{u},{g},{ctx}。形式:{{\"standard_name\":\"商品名\",\"retail_price\":5000,\"market_price\":15000,\"deadline\":null,\"genre\":\"{g}\",\"trust_score\":85,\"trust_reason\":\"本文確認\",\"sites\":[{{\"site_name\":\"受付元\",\"url\":\"{u}\",\"deadline\":null}}]}}"
         res = genai.Client(api_key=gk).models.generate_content(model="gemini-3.6-flash", contents=p)
         return json.loads(res.text.strip().replace("```json","").replace("```","").strip())
     except: return None
@@ -135,7 +142,6 @@ with c1:
                     fg = d.get("genre") or h["genre"]
                     ts, tr = parse_num(d.get("trust_score"), 70), d.get("trust_reason") or "本文確認"
                     raw_dl = d.get("deadline")
-                    
                     sites = [{**s, "created_at": today, "updated_at": today, "deadline_date": s.get("deadline") or raw_dl, "status": "未応募"} for s in d.get("sites", [])]
                     for l in get_links(pn, fg):
                         if not any(x["site_name"] == l["site_name"] for x in sites): sites.append({**l, "created_at": today, "updated_at": today, "status": "未応募"})
@@ -149,12 +155,12 @@ with c1:
 
 with c2:
     with st.popover("➕ 手動登録"):
-        in_n, in_u = st.text_input("商品名"), st.text_input("URL")
+        in_n, in_u = st.text_input("商品名"), st.text_input("URL (Xや公式リンク)")
         in_g = st.selectbox("ジャンル", ["TCG", "プレバン", "スニーカー", "ホビー", "ソフビ", "釣具", "海外相場", "カメラ", "キャンプ", "その他"])
         if st.button("登録", use_container_width=True):
             sites = [{"site_name": "指定URL", "url": in_u or "https://google.com", "created_at": today, "updated_at": today, "deadline_date": None, "status": "未応募"}]
-            for l in get_links(in_n or "手動商品", in_g): sites.append({**l, "created_at": today, "updated_at": today, "status": "未応募"})
-            save_db({"id": str(int(time.time()*1000)), "name": in_n or "手動商品", "url": in_u or "https://google.com", "retail_price": 5000, "market_price": 15000, "profit": 7750, "margin_rate": 51.7, "break_even": 6388, "sns_genre": in_g, "trust_score": 90, "trust_reason": "手動", "created_at": today, "updated_at": today, "sites": sites})
+            for l in get_links(in_n or "手動登録アイテム", in_g): sites.append({**l, "created_at": today, "updated_at": today, "status": "未応募"})
+            save_db({"id": str(int(time.time()*1000)), "name": in_n or "手動登録アイテム", "url": in_u or "https://google.com", "retail_price": 5000, "market_price": 15000, "profit": 7750, "margin_rate": 51.7, "break_even": 6388, "sns_genre": in_g, "trust_score": 95, "trust_reason": "X/手動登録", "created_at": today, "updated_at": today, "sites": sites})
             st.rerun()
 
 st.markdown("---")
