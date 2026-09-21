@@ -91,19 +91,6 @@ def load_custom_rss():
         except: pass
     return st.session_state.get("custom_rss", [])
 
-def add_custom_rss(name, raw_input):
-    target_url = clean_url(raw_input)
-    if not target_url or not target_url.startswith("http"): return
-    final_name = get_smart_name(name, target_url)
-    it = {"id": f"rss_{int(time.time()*1000)}", "name": final_name, "url": target_url, "sns_genre": "カスタムRSS"}
-    if sb:
-        try:
-            sb.table("items").insert(it).execute()
-            return
-        except: pass
-    if "custom_rss" not in st.session_state: st.session_state.custom_rss = []
-    st.session_state.custom_rss.append(it)
-
 def del_custom_rss(i_id):
     if sb:
         try:
@@ -138,11 +125,11 @@ def call_gemini(n, u, g, r):
     if not gk: return None
     try:
         td = dt.date.today().strftime("%Y-%m-%d")
-        p = f"本日は{td}。限定品速報アナリストとして商品名/コラボ名,定価(不明なら0),予想相場(不明なら0),受付締切(YYYY-MM-DD/不明ならnull),信頼度(0-100),理由をJSON出力。詳細未定の特設サイトでも名前と予告内容を必ず抽出せよ。対象:{n},{u},{g},{ctx}。形式:{{\"standard_name\":\"{n}\",\"retail_price\":0,\"market_price\":0,\"deadline\":null,\"genre\":\"{g}\",\"is_teaser\":true,\"trust_score\":90,\"trust_reason\":\"特設解禁\",\"sites\":[{{\"site_name\":\"特設サイト\",\"url\":\"{u}\",\"deadline\":null}}]}}"
+        p = f"本日は{td}。限定品アナリストとして商品名/コラボ名,定価(不明なら0),予想相場(不明なら0),受付締切(YYYY-MM-DD/null),信頼度,理由をJSON出力。特設予告も必ず抽出せよ。対象:{n},{u},{g},{ctx}。形式:{{\"standard_name\":\"{n}\",\"retail_price\":0,\"market_price\":0,\"deadline\":null,\"genre\":\"{g}\",\"is_teaser\":true,\"trust_score\":90,\"trust_reason\":\"特設解禁\",\"sites\":[{{\"site_name\":\"特設サイト\",\"url\":\"{u}\",\"deadline\":null}}]}}"
         res = genai.Client(api_key=gk).models.generate_content(model="gemini-3.6-flash", contents=p)
         return json.loads(res.text.strip().replace("```json","").replace("```","").strip())
     except:
-        return {"standard_name": n, "retail_price": 0, "market_price": 0, "deadline": None, "genre": g, "is_teaser": True, "trust_score": 85, "trust_reason": "特設ページ検知", "sites": [{"site_name": "特設サイト", "url": u, "deadline": None}]}
+        return {"standard_name": n, "retail_price": 0, "market_price": 0, "deadline": None, "genre": g, "is_teaser": True, "trust_score": 85, "trust_reason": "特設検知", "sites": [{"site_name": "特設サイト", "url": u, "deadline": None}]}
 
 def call_gemini_tweet_parse(tweet_text):
     if not gk: return None
@@ -153,21 +140,58 @@ def call_gemini_tweet_parse(tweet_text):
         return json.loads(res.text.strip().replace("```json","").replace("```","").strip())
     except: return None
 
+def add_custom_and_create_card(name, raw_input):
+    target_url = clean_url(raw_input)
+    if not target_url or not target_url.startswith("http"): return
+    final_name = get_smart_name(name, target_url)
+    td_str = dt.date.today().strftime("%Y-%m-%d")
+    # 1. カスタムリストに保存
+    it = {"id": f"rss_{int(time.time()*1000)}", "name": final_name, "url": target_url, "sns_genre": "カスタムRSS"}
+    if sb:
+        try: sb.table("items").insert(it).execute()
+        except: pass
+    
+    # 2. その場で即時解析してパトロール対象カードを直接追加（100%保証）
+    d = call_gemini(final_name, target_url, "ホビー", "")
+    pn = (d.get("standard_name") if (d and isinstance(d, dict)) else None) or final_name
+    rp = parse_num(d.get("retail_price"), 0) if (d and isinstance(d, dict)) else 0
+    mp = parse_num(d.get("market_price"), 0) if (d and isinstance(d, dict)) else 0
+    pf = mp - int(mp * 0.1) - 750 - rp if (mp and rp) else 0
+    mr = round((pf / mp) * 100, 1) if mp > 0 else 0
+    sites = [{"site_name": "特設ページ", "url": target_url, "created_at": td_str, "updated_at": td_str, "deadline_date": None, "status": "未応募"}]
+    for l in get_links(pn, "ホビー"): sites.append({**l, "created_at": td_str, "updated_at": td_str, "status": "未応募"})
+    
+    save_db({
+        "id": str(int(time.time()*1000) + 1),
+        "name": pn,
+        "url": target_url,
+        "retail_price": rp,
+        "market_price": mp,
+        "profit": pf,
+        "margin_rate": mr,
+        "break_even": 0,
+        "sns_genre": "ホビー",
+        "trust_score": 90,
+        "trust_reason": "特設即時登録",
+        "is_teaser": True,
+        "created_at": td_str,
+        "updated_at": td_str,
+        "sites": sites
+    })
+
 def fetch_all_feeds(custom_list):
     hits = []
     qs = [("クリスマスコフレ 予約 抽選","コフレ"),("ポケカ 抽選予約 予約開始","TCG"),("ワンピースカード 抽選予約","TCG"),("プレミアムバンダイ 受注開始 限定","プレバン"),("Nike SNKRS 抽選","スニーカー"),("ジャンプキャラクターズストア 受注","ホビー"),("DRT タイニークラッシュ 抽選","釣具")]
     for q, g in qs:
         f = feedparser.parse(f"https://news.google.com/rss/search?q={up.quote(q)}&hl=ja&gl=JP&ceid=JP:ja")
-        for e in f.entries[:2]: hits.append({"name": e.title, "url": e.link, "genre": g, "summary": getattr(e, "summary", ""), "is_custom": False})
+        for e in f.entries[:2]: hits.append({"name": e.title, "url": e.link, "genre": g, "summary": getattr(e, "summary", "")})
     for cr in custom_list:
         u = clean_url(cr.get("url", ""))
         if not u or not u.startswith("http"): continue
         cf = feedparser.parse(u)
         name_label = get_smart_name(cr.get('name'), u)
         if cf.entries:
-            for ce in cf.entries[:3]: hits.append({"name": f"【{name_label}】{ce.title}", "url": ce.link, "genre": "ホビー", "summary": getattr(ce, "summary", ""), "is_custom": True})
-        else:
-            hits.append({"name": f"【先行特設】{name_label}", "url": u, "genre": "ホビー", "summary": "特設ページ直接解析", "is_custom": True})
+            for ce in cf.entries[:3]: hits.append({"name": f"【{name_label}】{ce.title}", "url": ce.link, "genre": "ホビー", "summary": getattr(ce, "summary", "")})
     return hits
 
 st.subheader("🎯 プレ値パトロール")
@@ -200,18 +224,21 @@ with st.container(border=True):
 
 c_btn1, c_btn2 = st.columns([2, 1])
 with c_btn1:
-    btn_run = st.button("🔄 最新情報を高速巡回（特設サイト巡回含む）", use_container_width=True)
+    btn_run = st.button("🔄 最新情報を高速巡回（GoogleNews巡回）", use_container_width=True)
 with c_btn2:
     with st.popover("➕ 特設・速報サイト登録"):
-        st.caption("特設サイトURLやブログRSSを登録")
-        r_name = st.text_input("サイト名 (例: 眼鏡市場 遊戯王)")
+        st.caption("特設サイトURLを登録すると即座にカード化されます")
+        r_name = st.text_input("サイト名 (例: パルワールド 渋谷)")
         r_url = st.text_input("URL (特設LPまたはRSS)")
-        if st.button("登録する", use_container_width=True) and r_url:
-            add_custom_rss(r_name, r_url)
-            st.rerun()
+        if st.button("登録＆カード化する", use_container_width=True) and r_url:
+            with st.spinner("特設ページを解析してカードを作成中..."):
+                add_custom_and_create_card(r_name, r_url)
+                st.toast("✅ 特設サイトを即時カード化しました！")
+                time.sleep(0.5)
+                st.rerun()
         if custom_feeds:
             st.markdown("---")
-            st.caption("登録中サイト一覧:")
+            st.caption("登録中特設URL:")
             for cf_item in custom_feeds:
                 cc1, cc2 = st.columns([3, 1])
                 target_url = clean_url(cf_item.get('url', ''))
@@ -240,10 +267,8 @@ for it in items:
 if btn_run:
     pt, pb = st.empty(), st.progress(0)
     hits = fetch_all_feeds(custom_feeds)
-    # 商品アイテム群のURLマップ
     item_url_map = {clean_url(x.get("url")): x for x in items if x.get("url")}
-    # 特設サイト(is_custom=True)はキャッシュ判定をスキップして必ず実行
-    new_h = [h for h in hits if h.get("is_custom") or clean_url(h["url"]) not in item_url_map]
+    new_h = [h for h in hits if clean_url(h["url"]) not in item_url_map]
     total, done = len(new_h) or 1, 0
     with ThreadPoolExecutor(max_workers=4) as ex:
         f_map = {ex.submit(call_gemini, h["name"], h["url"], h["genre"], h["summary"]): h for h in new_h}
@@ -330,16 +355,4 @@ for item in fil_items:
                     rp, mp = parse_num(d.get("retail_price"), 0), parse_num(d.get("market_price"), 0)
                     new_dl = d.get("deadline")
                     for s in sites:
-                        if new_dl and not s.get("deadline_date"): s["deadline_date"] = new_dl
-                    update_db(item["id"], {"retail_price": rp, "market_price": mp, "profit": mp - int(mp * 0.1) - 750 - rp if (mp and rp) else 0, "sites": sites, "is_teaser": (rp == 0 and mp == 0), "trust_score": parse_num(d.get("trust_score"), 85), "trust_reason": d.get("trust_reason") or "再取得", "updated_at": today})
-                    st.rerun()
-
-        for idx, s in enumerate(sites):
-            with st.container(border=True):
-                st.write(f"🔗 **{s.get('site_name')}** (締切: `{s.get('deadline_date') or '未設定'}`)")
-                cs_st, cs_dt = st.columns(2)
-                cur_st = s.get("status", "未応募")
-                idx_sel = STATUS_OPTS.index(cur_st) if cur_st in STATUS_OPTS else 0
-                nst = cs_st.selectbox("状況", STATUS_OPTS, index=idx_sel, key=f"s_{item['id']}_{idx}")
-                d_val = parse_date_safe(s.get("deadline_date")) or today_d
-       
+               
