@@ -101,19 +101,26 @@ def delete_from_db(item_id):
 def get_default_platform_links(item_name, genre):
     encoded = urllib.parse.quote(item_name)
     links = []
-    if any(k in genre or k in item_name for k in ["TCG", "ポケカ", "ワンピース"]):
-        links.append({"site_name": "ポケモンセンターオンライン（検索）", "url": f"https://www.pokemoncenter-online.com/?main_page=product_list&keyword={encoded}", "deadline_date": "随時更新"})
-        links.append({"site_name": "あみあみ（抽選・予約検索）", "url": f"https://www.amiami.jp/top/page/c/search.html?s_keywords={encoded}", "deadline_date": "随時更新"})
+    g_str = str(genre) + str(item_name)
+    
+    if any(k in g_str for k in ["TCG", "ポケカ", "ポケモン", "ワンピース"]):
+        links.append({"site_name": "ポケモンセンターオンライン（抽選・販売）", "url": f"https://www.pokemoncenter-online.com/?main_page=product_list&keyword={encoded}", "deadline_date": "随時更新"})
+        links.append({"site_name": "あみあみ（抽選・予約）", "url": f"https://www.amiami.jp/top/page/c/search.html?s_keywords={encoded}", "deadline_date": "随時更新"})
         links.append({"site_name": "セブンネットショッピング", "url": f"https://7net.omni7.jp/search/?keyword={encoded}", "deadline_date": "随時更新"})
         links.append({"site_name": "ヨドバシ・ドット・コム", "url": f"https://www.yodobashi.com/?word={encoded}", "deadline_date": "随時更新"})
-    elif "プレバン" in genre or "バンダイ" in genre:
+        links.append({"site_name": "スニダン（トレカ相場・出品）", "url": f"https://snkrdunk.com/search?keywords={encoded}", "deadline_date": "随時更新"})
+    elif any(k in g_str for k in ["プレバン", "バンダイ", "フィギュア"]):
         links.append({"site_name": "プレミアムバンダイ公式", "url": f"https://p-bandai.jp/chara/c0001/?utm_source=search&keyword={encoded}", "deadline_date": "随時更新"})
         links.append({"site_name": "あみあみ公式", "url": f"https://www.amiami.jp/top/page/c/search.html?s_keywords={encoded}", "deadline_date": "随時更新"})
-    elif "ソフビ" in genre:
+        links.append({"site_name": "ビックカメラ.com", "url": f"https://www.biccamera.com/bc/category/?q={encoded}", "deadline_date": "随時更新"})
+    elif any(k in g_str for k in ["ソフビ", "ホビー"]):
         links.append({"site_name": "まんだらけ公式（ソフビ）", "url": f"https://order.mandarake.co.jp/order/listPage/list?keyword={encoded}", "deadline_date": "随時更新"})
         links.append({"site_name": "墓場の画廊", "url": "https://store.hakabanogarou.jp/shopbrand/ct10/", "deadline_date": "随時更新"})
+        links.append({"site_name": "メディコム・トイ公式", "url": "http://www.medicomtoy.co.jp/", "deadline_date": "随時更新"})
     else:
-        links.append({"site_name": "スニダン（検索）", "url": f"https://snkrdunk.com/search?keywords={encoded}", "deadline_date": "随時更新"})
+        links.append({"site_name": "SNKRS / Nike公式", "url": f"https://www.nike.com/jp/w?q={encoded}", "deadline_date": "随時更新"})
+        links.append({"site_name": "スニダン（スニーカー相場）", "url": f"https://snkrdunk.com/search?keywords={encoded}", "deadline_date": "随時更新"})
+        links.append({"site_name": "KITH TOKYO / atmos", "url": f"https://www.google.com/search?q={encoded}+抽選", "deadline_date": "随時更新"})
     return links
 
 # --- AI解析エンジン（Gemini 3.6 Flash） ---
@@ -157,12 +164,8 @@ def analyze_master_intelligence(name, url, genre, raw_text=""):
             contents=prompt
         )
         
-        raw_res = response.text.strip()
-        raw_res = raw_res.replace("```json", "")
-        raw_res = raw_res.replace("```", "")
-        clean_json = raw_res.strip()
-        
-        data = json.loads(clean_json)
+        raw_res = response.text.strip().replace("```json", "").replace("```", "").strip()
+        data = json.loads(raw_res)
         data["genre"] = genre
         return data
     except Exception:
@@ -251,7 +254,15 @@ with col_btn1:
                         break
                 
                 if matched_item:
-                    current_sites = matched_item.get("sites") or []
+                    curr_raw = matched_item.get("sites")
+                    if isinstance(curr_raw, str):
+                        try:
+                            current_sites = json.loads(curr_raw)
+                        except Exception:
+                            current_sites = []
+                    else:
+                        current_sites = curr_raw if isinstance(curr_raw, list) else []
+
                     existing_site_names = [x.get("site_name") for x in current_sites]
                     added = False
                     for s in sites_to_add:
@@ -288,13 +299,8 @@ with col_btn1:
 
         progress_bar.empty()
         progress_text.empty()
-        
-        if new_count > 0:
-            st.success(f"巡回完了：新たに {new_count} 件の商品を登録・更新しました！")
-            st.rerun()
-        else:
-            st.info("巡回完了：既存の商品情報を最新状態に更新しました。")
-            st.rerun()
+        st.success("巡回と受付サイトの自動更新が完了しました！")
+        st.rerun()
 
 with col_btn2:
     with st.popover("➕ 手動で案件を投入"):
@@ -359,20 +365,59 @@ st.markdown("---")
 # --- 商品一覧表示 ---
 items = load_db()
 
-applying_count = 0
-for it in items:
-    sites = it.get("sites") or []
-    if any(s.get("status") == "応募中" for s in sites):
-        applying_count += 1
+# 既存データのsites自動復元・正規化処理
+normalized_items = []
+today_str = datetime.date.today().strftime("%Y-%m-%d")
+
+for item in items:
+    raw_sites = item.get("sites")
+    if isinstance(raw_sites, str):
+        try:
+            raw_sites = json.loads(raw_sites)
+        except Exception:
+            raw_sites = []
+    elif not isinstance(raw_sites, list):
+        raw_sites = []
+
+    # サイトが0件の場合は即座にデフォルトリンク群で救済復元
+    if not raw_sites:
+        p_name = item.get("name", "")
+        p_genre = item.get("sns_genre", "ホビー")
+        if item.get("url"):
+            raw_sites.append({
+                "site_name": "公式・情報元ページ",
+                "url": item.get("url"),
+                "created_at": item.get("created_at", today_str),
+                "updated_at": item.get("updated_at", today_str),
+                "deadline_date": item.get("deadline_date", "公式参照"),
+                "status": "未応募"
+            })
+        for d in get_default_platform_links(p_name, p_genre):
+            raw_sites.append({
+                "site_name": d["site_name"],
+                "url": d["url"],
+                "created_at": item.get("created_at", today_str),
+                "updated_at": item.get("updated_at", today_str),
+                "deadline_date": d["deadline_date"],
+                "status": "未応募"
+            })
+        # DBにも補正保存
+        update_item_in_db(item["id"], {"sites": raw_sites})
+
+    item["sites"] = raw_sites
+    normalized_items.append(item)
+
+# 応募中件数のカウント
+applying_count = sum(1 for it in normalized_items if any(s.get("status") == "応募中" for s in it.get("sites", [])))
 
 filter_applying = st.checkbox(f"【応募中】がある商品のみ表示（現在: {applying_count} 件）")
 
-if not items:
+if not normalized_items:
     st.info("現在監視中の商品はありません。「全自動で最新情報を巡回収集」を実行してください。")
 else:
-    for item in items:
-        raw_sites = item.get("sites") or []
-        has_applying = any(s.get("status") == "応募中" for s in raw_sites)
+    for item in normalized_items:
+        sites_list = item.get("sites", [])
+        has_applying = any(s.get("status") == "応募中" for s in sites_list)
 
         if filter_applying and not has_applying:
             continue
@@ -408,10 +453,10 @@ else:
             q_col1.link_button("👟 スニダン相場を確認", f"https://snkrdunk.com/search?keywords={kw}", use_container_width=True)
             q_col2.link_button("🔴 メルカリ直近落札相場", f"https://jp.mercari.com/search?keyword={kw}&status=sold_out", use_container_width=True)
 
-            st.markdown(f"#### 📝 申込み・受付サイト一覧（{len(raw_sites)} 件）")
+            st.markdown(f"#### 📝 申込み・受付サイト一覧（{len(sites_list)} 件）")
 
             updated_sites = False
-            for s_idx, s in enumerate(raw_sites):
+            for s_idx, s in enumerate(sites_list):
                 with st.container():
                     st.markdown(f"""
                     <div class='site-card'>
@@ -441,9 +486,8 @@ else:
                         st.link_button("👉 受付ページへ飛ぶ", s.get("url", "https://google.com"), use_container_width=True)
 
             if updated_sites:
-                today_str = datetime.date.today().strftime("%Y-%m-%d")
                 update_item_in_db(item["id"], {
-                    "sites": raw_sites,
-                    "updated_at": today_str
+                    "sites": sites_list,
+                    "updated_at": datetime.date.today().strftime("%Y-%m-%d")
                 })
                 st.rerun()
