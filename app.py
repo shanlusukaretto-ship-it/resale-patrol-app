@@ -115,7 +115,7 @@ def del_custom_rss(i_id):
 
 def fetch_web_text(url):
     try:
-        req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'})
+        req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15'})
         with urllib.request.urlopen(req, timeout=5) as response:
             html = response.read().decode('utf-8', errors='ignore')
             text = re.sub(r'<[^>]+>', ' ', html)
@@ -133,15 +133,16 @@ def get_links(n, g):
     return [{"site_name": "公式情報元", "url": "https://google.com", "deadline_date": None}]
 
 def call_gemini(n, u, g, r):
-    if not gk: return None
     body_txt = fetch_web_text(u) if u.startswith("http") else ""
     ctx = f"{r} {body_txt}"[:2000]
+    if not gk: return None
     try:
         td = dt.date.today().strftime("%Y-%m-%d")
-        p = f"本日は{td}。限定品アナリストとして商品名,定価(不明なら0),予想相場(不明なら0),受付締切(YYYY-MM-DD/不明ならnull),信頼度(0-100),理由をJSON出力。特設予告も抽出せよ。対象:{n},{u},{g},{ctx}。形式:{{\"standard_name\":\"商品名\",\"retail_price\":0,\"market_price\":0,\"deadline\":null,\"genre\":\"{g}\",\"is_teaser\":true,\"trust_score\":90,\"trust_reason\":\"特設解禁\",\"sites\":[{{\"site_name\":\"特設元\",\"url\":\"{u}\",\"deadline\":null}}]}}"
+        p = f"本日は{td}。限定品速報アナリストとして商品名/コラボ名,定価(不明なら0),予想相場(不明なら0),受付締切(YYYY-MM-DD/不明ならnull),信頼度(0-100),理由をJSON出力。詳細未定の特設サイトでも名前と予告内容を必ず抽出せよ。対象:{n},{u},{g},{ctx}。形式:{{\"standard_name\":\"{n}\",\"retail_price\":0,\"market_price\":0,\"deadline\":null,\"genre\":\"{g}\",\"is_teaser\":true,\"trust_score\":90,\"trust_reason\":\"特設解禁\",\"sites\":[{{\"site_name\":\"特設サイト\",\"url\":\"{u}\",\"deadline\":null}}]}}"
         res = genai.Client(api_key=gk).models.generate_content(model="gemini-3.6-flash", contents=p)
         return json.loads(res.text.strip().replace("```json","").replace("```","").strip())
-    except: return None
+    except:
+        return {"standard_name": n, "retail_price": 0, "market_price": 0, "deadline": None, "genre": g, "is_teaser": True, "trust_score": 85, "trust_reason": "特設ページ検知", "sites": [{"site_name": "特設サイト", "url": u, "deadline": None}]}
 
 def call_gemini_tweet_parse(tweet_text):
     if not gk: return None
@@ -157,16 +158,16 @@ def fetch_all_feeds(custom_list):
     qs = [("クリスマスコフレ 予約 抽選","コフレ"),("ポケカ 抽選予約 予約開始","TCG"),("ワンピースカード 抽選予約","TCG"),("プレミアムバンダイ 受注開始 限定","プレバン"),("Nike SNKRS 抽選","スニーカー"),("ジャンプキャラクターズストア 受注","ホビー"),("DRT タイニークラッシュ 抽選","釣具")]
     for q, g in qs:
         f = feedparser.parse(f"https://news.google.com/rss/search?q={up.quote(q)}&hl=ja&gl=JP&ceid=JP:ja")
-        for e in f.entries[:2]: hits.append({"name": e.title, "url": e.link, "genre": g, "summary": getattr(e, "summary", "")})
+        for e in f.entries[:2]: hits.append({"name": e.title, "url": e.link, "genre": g, "summary": getattr(e, "summary", ""), "is_custom": False})
     for cr in custom_list:
         u = clean_url(cr.get("url", ""))
         if not u or not u.startswith("http"): continue
         cf = feedparser.parse(u)
         name_label = get_smart_name(cr.get('name'), u)
         if cf.entries:
-            for ce in cf.entries[:3]: hits.append({"name": f"【{name_label}】{ce.title}", "url": ce.link, "genre": "ホビー", "summary": getattr(ce, "summary", "")})
+            for ce in cf.entries[:3]: hits.append({"name": f"【{name_label}】{ce.title}", "url": ce.link, "genre": "ホビー", "summary": getattr(ce, "summary", ""), "is_custom": True})
         else:
-            hits.append({"name": f"【先行告知】{name_label}", "url": u, "genre": "ホビー", "summary": "特設ページ直接解析"})
+            hits.append({"name": f"【先行特設】{name_label}", "url": u, "genre": "ホビー", "summary": "特設ページ直接解析", "is_custom": True})
     return hits
 
 st.subheader("🎯 プレ値パトロール")
@@ -239,8 +240,10 @@ for it in items:
 if btn_run:
     pt, pb = st.empty(), st.progress(0)
     hits = fetch_all_feeds(custom_feeds)
-    c_map = {clean_url(x.get("url")): parse_date_safe(x.get("updated_at") or x.get("created_at")) or (today_d - dt.timedelta(days=10)) for x in items if x.get("url")}
-    new_h = [h for h in hits if clean_url(h["url"]) not in c_map or (today_d - c_map[clean_url(h["url"])]).days >= 3]
+    # 商品アイテム群のURLマップ
+    item_url_map = {clean_url(x.get("url")): x for x in items if x.get("url")}
+    # 特設サイト(is_custom=True)はキャッシュ判定をスキップして必ず実行
+    new_h = [h for h in hits if h.get("is_custom") or clean_url(h["url"]) not in item_url_map]
     total, done = len(new_h) or 1, 0
     with ThreadPoolExecutor(max_workers=4) as ex:
         f_map = {ex.submit(call_gemini, h["name"], h["url"], h["genre"], h["summary"]): h for h in new_h}
@@ -339,7 +342,4 @@ for item in fil_items:
                 idx_sel = STATUS_OPTS.index(cur_st) if cur_st in STATUS_OPTS else 0
                 nst = cs_st.selectbox("状況", STATUS_OPTS, index=idx_sel, key=f"s_{item['id']}_{idx}")
                 d_val = parse_date_safe(s.get("deadline_date")) or today_d
-                nd = cs_dt.date_input("締切編集", value=d_val, key=f"dt_{item['id']}_{idx}").strftime("%Y-%m-%d")
-                if nst != cur_st or (s.get("deadline_date") and nd != s.get("deadline_date")):
-                    s["status"], s["deadline_date"], s["updated_at"] = nst, nd, today
-           
+       
