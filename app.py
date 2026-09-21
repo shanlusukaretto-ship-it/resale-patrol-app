@@ -20,8 +20,10 @@ def get_icon(g):
     return "📦"
 
 def parse_num(v, d):
-    c = re.sub(r"[^\d]", "", str(v)) if v else ""
-    return int(c) if c else d
+    if v is None: return d
+    c = re.sub(r"[^\d\-]", "", str(v))
+    try: return int(c)
+    except: return d
 
 def parse_date_safe(val):
     if not val: return None
@@ -133,8 +135,6 @@ def fetch_all_feeds(custom_list):
     for q, g in qs:
         f = feedparser.parse(f"https://news.google.com/rss/search?q={up.quote(q)}&hl=ja&gl=JP&ceid=JP:ja")
         for e in f.entries[:2]: hits.append({"name": e.title, "url": e.link, "genre": g, "summary": getattr(e, "summary", "")})
-    
-    # 対応2: 登録されたカスタムRSS/ブログを巡回
     for cr in custom_list:
         try:
             cf = feedparser.parse(cr["url"])
@@ -149,7 +149,6 @@ today = today_d.strftime("%Y-%m-%d")
 
 custom_feeds = load_custom_rss()
 
-# 対応1: 最上部にXコピペ解析フォームを配置（自動クリア機能付き）
 with st.container(border=True):
     st.write("⚡ **Xポスト・告知文をAI解析して巡回追加**")
     with st.form("x_parse_form", clear_on_submit=True):
@@ -178,7 +177,7 @@ with c_btn1:
     btn_run = st.button("🔄 最新情報を高速巡回（カスタム巡回含む）", use_container_width=True)
 with c_btn2:
     with st.popover("➕ 速報サイト追加"):
-        st.caption("対応2: 好きなブログや速報RSSを追加")
+        st.caption("好きなブログや速報RSSを追加")
         r_name = st.text_input("サイト名 (例: ポケカ速報)")
         r_url = st.text_input("RSS/ブログURL")
         if st.button("登録する", use_container_width=True):
@@ -250,9 +249,9 @@ with cs:
     s_mode = st.selectbox("並び順", ["更新順", "新着順", "利益額順", "利益率順", "相場順", "締切順"])
 
 fil_items = [it for it in norm_items if (s_gen == "すべて" or (s_gen.split()[-1] in it.get("sns_genre",""))) and (not f_app or any(s.get("status") == "応募中" for s in it.get("sites",[])))]
-if s_mode == "利益額順": fil_items.sort(key=lambda x: x.get("profit", 0), reverse=True)
-elif s_mode == "利益率順": fil_items.sort(key=lambda x: x.get("margin_rate", 0), reverse=True)
-elif s_mode == "相場順": fil_items.sort(key=lambda x: x.get("market_price", 0), reverse=True)
+if s_mode == "利益額順": fil_items.sort(key=lambda x: parse_num(x.get("profit"), 0), reverse=True)
+elif s_mode == "利益率順": fil_items.sort(key=lambda x: float(x.get("margin_rate") or 0), reverse=True)
+elif s_mode == "相場順": fil_items.sort(key=lambda x: parse_num(x.get("market_price"), 0), reverse=True)
 elif s_mode == "締切順": fil_items.sort(key=lambda x: min([s.get("deadline_date") for s in x.get("sites",[]) if s.get("deadline_date")] or ["9999-99-99"]))
 elif s_mode == "新着順": fil_items.sort(key=lambda x: str(x.get("id","")), reverse=True)
 else: fil_items.sort(key=lambda x: str(x.get("updated_at","")), reverse=True)
@@ -262,7 +261,7 @@ st.caption(f"📦 パトロール対象: **{len(fil_items)}** 件")
 for item in fil_items:
     sites = item.get("sites", [])
     has_app = any(s.get("status") == "応募中" for s in sites)
-    pv = item.get('profit', 0)
+    pv = parse_num(item.get('profit'), 0)
     p_badge = f"{'🔥' if pv >= 50000 else '💰'} +{pv:,}円" if pv >= 10000 else ""
     with st.expander(f"{get_icon(item.get('sns_genre',''))} {item.get('name','')} {p_badge} {'【応募中】' if has_app else ''}"):
         ci, cd = st.columns([5, 1])
@@ -270,11 +269,11 @@ for item in fil_items:
         if cd.button("削除", key=f"del_{item['id']}"): del_db(item["id"]); st.rerun()
         
         c_m1, c_m2 = st.columns(2)
-        c_m1.metric("定価", f"¥{item.get('retail_price',0):,}")
-        c_m2.metric("相場", f"¥{item.get('market_price',0):,}")
+        c_m1.metric("定価", f"¥{parse_num(item.get('retail_price'), 0):,}")
+        c_m2.metric("相場", f"¥{parse_num(item.get('market_price'), 0):,}")
         c_m3, c_m4 = st.columns(2)
         c_m3.metric("利益", f"¥{pv:,}", f"{item.get('margin_rate',0)}%")
-        c_m4.metric("損益分岐", f"¥{item.get('break_even',0):,}")
+        c_m4.metric("損益分岐", f"¥{parse_num(item.get('break_even'), 0):,}")
         
         cx1, cx2 = st.columns([1, 1])
         with cx1:
@@ -282,7 +281,7 @@ for item in fil_items:
                 stars = "★★★★★" if pv >= 30000 else "★★★★☆" if pv >= 10000 else "★★★☆☆"
                 dl_found = [s.get("deadline_date") for s in sites if s.get("deadline_date")]
                 dl_str = min(dl_found) if dl_found else "公式アナウンス確認推奨"
-                tw_main = f"【定価購入アラート🚨】\n二次流通でのプレ値高騰が予想される注目アイテムです。定価で手に入れたい方は公式受付をお見逃しなく！\n\n📦 {item.get('name','')}\n・定価目安: ¥{item.get('retail_price',0):,}\n・注目度: {stars}（市場目安: 約¥{item.get('market_price',0):,}〜）\n\n⏰ 締切目安: {dl_str}\n⚠️ 忘れ防止に【ブックマーク🔖】推奨\n\n👇 応募先リンクはリプライ欄に記載\n#{item.get('sns_genre','限定品')} #定価購入 #抽選速報"
+                tw_main = f"【定価購入アラート🚨】\n二次流通でのプレ値高騰が予想される注目アイテムです。定価で手に入れたい方は公式受付をお見逃しなく！\n\n📦 {item.get('name','')}\n・定価目安: ¥{parse_num(item.get('retail_price'), 0):,}\n・注目度: {stars}（市場目安: 約¥{parse_num(item.get('market_price'), 0):,}〜）\n\n⏰ 締切目安: {dl_str}\n⚠️ 忘れ防止に【ブックマーク🔖】推奨\n\n👇 応募先リンクはリプライ欄に記載\n#{item.get('sns_genre','限定品')} #定価購入 #抽選速報"
                 tw_rep = "【受付リンク】\n" + "\n".join([f"・{s.get('site_name')}: {s.get('url')}" for s in sites[:2]])
                 st.text_area("本文", tw_main, height=120, key=f"tw_m_{item['id']}")
                 st.link_button("👉 𝕏 投稿画面へ", f"https://twitter.com/intent/tweet?text={up.quote(tw_main)}", use_container_width=True)
@@ -291,7 +290,7 @@ for item in fil_items:
             if st.button("🔄 相場・締切再取得", key=f"r_{item['id']}", use_container_width=True):
                 d = call_gemini(item.get("name",""), item.get("url",""), item.get("sns_genre",""), "")
                 if d and isinstance(d, dict):
-                    rp, mp = parse_num(d.get("retail_price"), item.get("retail_price",5000)), parse_num(d.get("market_price"), item.get("market_price",15000))
+                    rp, mp = parse_num(d.get("retail_price"), parse_num(item.get('retail_price'), 5000)), parse_num(d.get("market_price"), parse_num(item.get('market_price'), 15000))
                     new_dl = d.get("deadline")
                     for s in sites:
                         if new_dl and not s.get("deadline_date"): s["deadline_date"] = new_dl
