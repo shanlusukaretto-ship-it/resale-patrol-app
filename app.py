@@ -84,7 +84,7 @@ def del_custom_rss(i_id):
             return
         except: pass
     if "custom_rss" in st.session_state:
-        st.session_state.custom_rss = [x for x in st.session_state.custom_rss if str(x.get("id")) != str(i_id)]
+        st.session_state.custom_rss = [x for x in st.session_state.custom_rss if x.get("id") != i_id]
 
 def fetch_web_text(url):
     try:
@@ -157,7 +157,6 @@ def fetch_all_feeds(custom_list):
             for ce in cf.entries[:3]:
                 hits.append({"name": f"【{cr['name']}】{ce.title}", "url": ce.link, "genre": "ホビー", "summary": getattr(ce, "summary", "")})
         else:
-            # RSSではない特設サイトLPの場合、直接そのURLをターゲットに設定
             hits.append({"name": f"【特設】{cr['name']}", "url": u, "genre": "ホビー", "summary": "特設ページ直接解析"})
     return hits
 
@@ -206,9 +205,9 @@ with c_btn2:
             st.caption("登録中カスタムサイト:")
             for cf_item in custom_feeds:
                 cc1, cc2 = st.columns([3, 1])
-                disp_url = cf_item.get('url', '')
-                short_u = disp_url[:22] + "..." if len(disp_url) > 22 else disp_url
-                cc1.markdown(f"**{cf_item.get('name')}**\n`{short_u}`")
+                target_url = cf_item.get('url', 'https://google.com')
+                # リンクとして直接タップして飛べるように変更
+                cc1.markdown(f"👉 [{cf_item.get('name')}]({target_url})")
                 if cc2.button("削除", key=f"del_rss_{cf_item['id']}"):
                     del_custom_rss(cf_item["id"])
                     st.rerun()
