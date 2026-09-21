@@ -64,7 +64,7 @@ def call_gemini(n, u, g, r):
     try:
         td = dt.date.today().strftime("%Y-%m-%d")
         dl = (dt.date.today() + dt.timedelta(days=7)).strftime("%Y-%m-%d")
-        p = f"本日は{td}。限定品・極小生産品アナリストとして定価,予想相場,受付元,情報信頼度(0-100),理由をJSON出力。自動車バイク除外。対象:{n},{u},{g},{r[:250]}。形式:{{\"standard_name\":\"商品名\",\"retail_price\":5000,\"market_price\":15000,\"deadline\":\"{dl}\",\"genre\":\"{g}\",\"trust_score\":85,\"trust_reason\":\"公式確認\",\"sites\":[{{\"site_name\":\"受付元\",\"url\":\"{u}\",\"deadline\":\"{dl}\"}}]}}"
+        p = f"本日は{td}。限定品アナリストとして定価,予想相場,受付元,情報信頼度(0-100),理由をJSON出力。自動車バイク除外。対象:{n},{u},{g},{r[:250]}。形式:{{\"standard_name\":\"商品名\",\"retail_price\":5000,\"market_price\":15000,\"deadline\":\"{dl}\",\"genre\":\"{g}\",\"trust_score\":85,\"trust_reason\":\"公式確認\",\"sites\":[{{\"site_name\":\"受付元\",\"url\":\"{u}\",\"deadline\":\"{dl}\"}}]}}"
         res = genai.Client(api_key=gk).models.generate_content(model="gemini-3.6-flash", contents=p)
         return json.loads(res.text.strip().replace("```json","").replace("```","").strip())
     except: return None
@@ -181,9 +181,9 @@ for item in fil_items:
                 dl_str = min([s.get("deadline_date") for s in sites if s.get("deadline_date")] or [def_dl])
                 tw_main = f"【定価購入アラート🚨】\n二次流通でのプレ値高騰が予想される注目アイテムです。定価で手に入れたい方は公式受付をお見逃しなく！\n\n📦 {item.get('name','')}\n・定価目安: ¥{item.get('retail_price',0):,}\n・注目度: {stars}（市場目安: 約¥{item.get('market_price',0):,}〜）\n\n⏰ 締切: 〜{dl_str}\n⚠️ 忘れ防止に【ブックマーク🔖】推奨\n\n👇 応募先リンクはリプライ欄に記載\n#{item.get('sns_genre','限定品')} #定価購入 #抽選速報"
                 tw_rep = "【受付リンク】\n" + "\n".join([f"・{s.get('site_name')}: {s.get('url')}" for s in sites[:2]])
-                st.text_area("本文", tw_main, height=120)
+                st.text_area("本文", tw_main, height=120, key=f"tw_m_{item['id']}")
                 st.link_button("👉 𝕏 投稿画面へ", f"https://twitter.com/intent/tweet?text={up.quote(tw_main)}", use_container_width=True)
-                st.text_area("リプライ用", tw_rep, height=70)
+                st.text_area("リプライ用", tw_rep, height=70, key=f"tw_r_{item['id']}")
         with cx2:
             if st.button("🔄 相場再取得", key=f"r_{item['id']}", use_container_width=True):
                 d = call_gemini(item.get("name",""), item.get("url",""), item.get("sns_genre",""), "")
