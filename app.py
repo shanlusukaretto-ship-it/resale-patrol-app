@@ -1,4 +1,5 @@
 import streamlit as st, datetime as dt, urllib.parse as up, json, time, feedparser, re
+import urllib.request
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from google import genai
 from supabase import create_client
@@ -22,13 +23,10 @@ def parse_num(v, d):
     c = re.sub(r"[^\d]", "", str(v)) if v else ""
     return int(c) if c else d
 
-def parse_date_safe(val, default_date):
-    if not val: return default_date
-    try:
-        s = str(val)[:10]
-        return dt.datetime.strptime(s, "%Y-%m-%d").date()
-    except:
-        return default_date
+def parse_date_safe(val):
+    if not val: return None
+    try: return dt.datetime.strptime(str(val)[:10], "%Y-%m-%d").date()
+    except: return None
 
 def load_db():
     if sb:
@@ -53,26 +51,37 @@ def del_db(i_id):
         except: pass
     st.session_state.items = [x for x in st.session_state.items if str(x.get("id")) != str(i_id)]
 
-def get_links(n, g, dl):
+def fetch_web_text(url):
+    try:
+        req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'})
+        with urllib.request.urlopen(req, timeout=4) as response:
+            html = response.read().decode('utf-8', errors='ignore')
+            text = re.sub(r'<[^>]+>', ' ', html)
+            return ' '.join(text.split())[:1500]
+    except:
+        return ""
+
+def get_links(n, g):
     e, t = up.quote(n), str(g) + str(n)
     if any(k in t for k in ["TCG", "ポケカ", "ワンピ", "ドラゴンボール"]):
-        res = [{"site_name": "あみあみ（予約抽選）", "url": f"https://www.amiami.jp/top/page/c/search.html?s_keywords={e}", "deadline_date": dl},
-               {"site_name": "ヨドバシ", "url": f"https://www.yodobashi.com/?word={e}", "deadline_date": dl},
-               {"site_name": "スニダン相場", "url": f"https://snkrdunk.com/search?keywords={e}", "deadline_date": dl}]
-        if "ポケ" in t: res.insert(0, {"site_name": "ポケセン", "url": f"https://www.pokemoncenter-online.com/?main_page=product_list&keyword={e}", "deadline_date": dl})
-        elif "ドラゴンボール" in t: res.insert(0, {"site_name": "プレバン公式", "url": f"https://p-bandai.jp/chara/c0005/?keyword={e}", "deadline_date": dl})
+        res = [{"site_name": "あみあみ（予約抽選）", "url": f"https://www.amiami.jp/top/page/c/search.html?s_keywords={e}", "deadline_date": None},
+               {"site_name": "ヨドバシ", "url": f"https://www.yodobashi.com/?word={e}", "deadline_date": None},
+               {"site_name": "スニダン相場", "url": f"https://snkrdunk.com/search?keywords={e}", "deadline_date": None}]
+        if "ポケ" in t: res.insert(0, {"site_name": "ポケセン", "url": f"https://www.pokemoncenter-online.com/?main_page=product_list&keyword={e}", "deadline_date": None})
+        elif "ドラゴンボール" in t: res.insert(0, {"site_name": "プレバン公式", "url": f"https://p-bandai.jp/chara/c0005/?keyword={e}", "deadline_date": None})
         return res
-    if "プレバン" in t: return [{"site_name": "プレバン公式", "url": f"https://p-bandai.jp/chara/c0001/?keyword={e}", "deadline_date": dl}]
-    if any(k in t for k in ["スニーカー", "NIKE", "SNKRS"]): return [{"site_name": "SNKRS", "url": f"https://www.nike.com/jp/w?q={e}", "deadline_date": dl}]
-    if any(k in t for k in ["釣具", "DRT", "クラッシュ"]): return [{"site_name": "バックラッシュ", "url": f"https://www.backlash.co.jp/item_list/?kw={e}", "deadline_date": dl}]
-    return [{"site_name": "公式情報元", "url": "https://google.com", "deadline_date": dl}]
+    if "プレバン" in t: return [{"site_name": "プレバン公式", "url": f"https://p-bandai.jp/chara/c0001/?keyword={e}", "deadline_date": None}]
+    if any(k in t for k in ["スニーカー", "NIKE", "SNKRS"]): return [{"site_name": "SNKRS", "url": f"https://www.nike.com/jp/w?q={e}", "deadline_date": None}]
+    if any(k in t for k in ["釣具", "DRT", "クラッシュ"]): return [{"site_name": "バックラッシュ", "url": f"https://www.backlash.co.jp/item_list/?kw={e}", "deadline_date": None}]
+    return [{"site_name": "公式情報元", "url": "https://google.com", "deadline_date": None}]
 
 def call_gemini(n, u, g, r):
     if not gk or any(bw in n or bw in r for bw in ["車", "自動車", "バイク", "タイヤ"]): return None
+    body_txt = fetch_web_text(u)
+    ctx = f"{r} {body_txt}"[:1800]
     try:
         td = dt.date.today().strftime("%Y-%m-%d")
-        dl = (dt.date.today() + dt.timedelta(days=7)).strftime("%Y-%m-%d")
-        p = f"本日は{td}。限定品アナリストとして定価,予想相場,受付元,情報信頼度(0-100),理由をJSON出力。自動車バイク除外。対象:{n},{u},{g},{r[:250]}。形式:{{\"standard_name\":\"商品名\",\"retail_price\":5000,\"market_price\":15000,\"deadline\":\"{dl}\",\"genre\":\"{g}\",\"trust_score\":85,\"trust_reason\":\"公式確認\",\"sites\":[{{\"site_name\":\"受付元\",\"url\":\"{u}\",\"deadline\":\"{dl}\"}}]}}"
+        p = f"本日は{td}。限定品アナリストとして定価,相場,受付締切日(YYYY-MM-DD),信頼度(0-100),理由をJSON出力。締切日が本文から正確に分からない場合は絶対に推測せずnullにすること。対象:{n},{u},{g},{ctx}。形式:{{\"standard_name\":\"商品名\",\"retail_price\":5000,\"market_price\":15000,\"deadline\":null,\"genre\":\"{g}\",\"trust_score\":85,\"trust_reason\":\"本文解析済\",\"sites\":[{{\"site_name\":\"受付元\",\"url\":\"{u}\",\"deadline\":null}}]}}"
         res = genai.Client(api_key=gk).models.generate_content(model="gemini-3.6-flash", contents=p)
         return json.loads(res.text.strip().replace("```json","").replace("```","").strip())
     except: return None
@@ -87,7 +96,7 @@ def fetch_rss():
 
 st.subheader("🎯 プレ値パトロール")
 today_d = dt.date.today()
-today, def_dl = today_d.strftime("%Y-%m-%d"), (today_d + dt.timedelta(days=7)).strftime("%Y-%m-%d")
+today = today_d.strftime("%Y-%m-%d")
 
 items = load_db()
 norm_items = []
@@ -97,8 +106,8 @@ for it in items:
         try: s = json.loads(s)
         except: s = []
     if not s:
-        s = [{"site_name": "情報元", "url": it.get("url","https://google.com"), "created_at": today, "updated_at": today, "deadline_date": def_dl, "status": "未応募"}]
-        for l in get_links(it.get("name",""), it.get("sns_genre",""), def_dl): s.append({**l, "created_at": today, "updated_at": today, "status": "未応募"})
+        s = [{"site_name": "情報元", "url": it.get("url","https://google.com"), "created_at": today, "updated_at": today, "deadline_date": None, "status": "未応募"}]
+        for l in get_links(it.get("name",""), it.get("sns_genre","")): s.append({**l, "created_at": today, "updated_at": today, "status": "未応募"})
         update_db(it["id"], {"sites": s})
     it["sites"] = s
     norm_items.append(it)
@@ -108,11 +117,7 @@ with c1:
     if st.button("🔄 最新情報を高速巡回", use_container_width=True):
         pt, pb = st.empty(), st.progress(0)
         hits, all_it = fetch_rss(), load_db()
-        
-        # 安全な日付パースでエラーを防止
-        default_old = today_d - dt.timedelta(days=10)
-        c_map = {x.get("url"): parse_date_safe(x.get("updated_at") or x.get("created_at"), default_old) for x in all_it if x.get("url")}
-        
+        c_map = {x.get("url"): parse_date_safe(x.get("updated_at") or x.get("created_at")) or (today_d - dt.timedelta(days=10)) for x in all_it if x.get("url")}
         new_h = [h for h in hits if h["url"] not in c_map or (today_d - c_map[h["url"]]).days >= 3]
         total, done = len(new_h) or 1, 0
         with ThreadPoolExecutor(max_workers=4) as ex:
@@ -128,9 +133,11 @@ with c1:
                     pf = mp - int(mp * 0.1) - 750 - rp
                     mr = round((pf / mp) * 100, 1) if mp > 0 else 0
                     fg = d.get("genre") or h["genre"]
-                    ts, tr = parse_num(d.get("trust_score"), 70), d.get("trust_reason") or "通常ソース"
-                    sites = [{**s, "created_at": today, "updated_at": today, "status": "未応募"} for s in d.get("sites", [])]
-                    for l in get_links(pn, fg, def_dl):
+                    ts, tr = parse_num(d.get("trust_score"), 70), d.get("trust_reason") or "本文確認"
+                    raw_dl = d.get("deadline")
+                    
+                    sites = [{**s, "created_at": today, "updated_at": today, "deadline_date": s.get("deadline") or raw_dl, "status": "未応募"} for s in d.get("sites", [])]
+                    for l in get_links(pn, fg):
                         if not any(x["site_name"] == l["site_name"] for x in sites): sites.append({**l, "created_at": today, "updated_at": today, "status": "未応募"})
                     match = next((x for x in all_it if pn in x.get("name","") or x.get("url") == h["url"]), None)
                     if match:
@@ -145,8 +152,8 @@ with c2:
         in_n, in_u = st.text_input("商品名"), st.text_input("URL")
         in_g = st.selectbox("ジャンル", ["TCG", "プレバン", "スニーカー", "ホビー", "ソフビ", "釣具", "海外相場", "カメラ", "キャンプ", "その他"])
         if st.button("登録", use_container_width=True):
-            sites = [{"site_name": "指定URL", "url": in_u or "https://google.com", "created_at": today, "updated_at": today, "deadline_date": def_dl, "status": "未応募"}]
-            for l in get_links(in_n or "手動商品", in_g, def_dl): sites.append({**l, "created_at": today, "updated_at": today, "status": "未応募"})
+            sites = [{"site_name": "指定URL", "url": in_u or "https://google.com", "created_at": today, "updated_at": today, "deadline_date": None, "status": "未応募"}]
+            for l in get_links(in_n or "手動商品", in_g): sites.append({**l, "created_at": today, "updated_at": today, "status": "未応募"})
             save_db({"id": str(int(time.time()*1000)), "name": in_n or "手動商品", "url": in_u or "https://google.com", "retail_price": 5000, "market_price": 15000, "profit": 7750, "margin_rate": 51.7, "break_even": 6388, "sns_genre": in_g, "trust_score": 90, "trust_reason": "手動", "created_at": today, "updated_at": today, "sites": sites})
             st.rerun()
 
@@ -163,7 +170,7 @@ fil_items = [it for it in norm_items if (s_gen == "すべて" or (s_gen.split()[
 if s_mode == "利益額順": fil_items.sort(key=lambda x: x.get("profit", 0), reverse=True)
 elif s_mode == "利益率順": fil_items.sort(key=lambda x: x.get("margin_rate", 0), reverse=True)
 elif s_mode == "相場順": fil_items.sort(key=lambda x: x.get("market_price", 0), reverse=True)
-elif s_mode == "締切順": fil_items.sort(key=lambda x: min([s.get("deadline_date") for s in x.get("sites",[]) if s.get("deadline_date")] or ["9999"]))
+elif s_mode == "締切順": fil_items.sort(key=lambda x: min([s.get("deadline_date") for s in x.get("sites",[]) if s.get("deadline_date")] or ["9999-99-99"]))
 elif s_mode == "新着順": fil_items.sort(key=lambda x: str(x.get("id","")), reverse=True)
 else: fil_items.sort(key=lambda x: str(x.get("updated_at","")), reverse=True)
 
@@ -190,18 +197,22 @@ for item in fil_items:
         with cx1:
             with st.popover("𝕏 ポスト文面", use_container_width=True):
                 stars = "★★★★★" if pv >= 30000 else "★★★★☆" if pv >= 10000 else "★★★☆☆"
-                dl_str = min([s.get("deadline_date") for s in sites if s.get("deadline_date")] or [def_dl])
-                tw_main = f"【定価購入アラート🚨】\n二次流通でのプレ値高騰が予想される注目アイテムです。定価で手に入れたい方は公式受付をお見逃しなく！\n\n📦 {item.get('name','')}\n・定価目安: ¥{item.get('retail_price',0):,}\n・注目度: {stars}（市場目安: 約¥{item.get('market_price',0):,}〜）\n\n⏰ 締切: 〜{dl_str}\n⚠️ 忘れ防止に【ブックマーク🔖】推奨\n\n👇 応募先リンクはリプライ欄に記載\n#{item.get('sns_genre','限定品')} #定価購入 #抽選速報"
+                dl_found = [s.get("deadline_date") for s in sites if s.get("deadline_date")]
+                dl_str = min(dl_found) if dl_found else "公式アナウンス確認推奨"
+                tw_main = f"【定価購入アラート🚨】\n二次流通でのプレ値高騰が予想される注目アイテムです。定価で手に入れたい方は公式受付をお見逃しなく！\n\n📦 {item.get('name','')}\n・定価目安: ¥{item.get('retail_price',0):,}\n・注目度: {stars}（市場目安: 約¥{item.get('market_price',0):,}〜）\n\n⏰ 締切目安: {dl_str}\n⚠️ 忘れ防止に【ブックマーク🔖】推奨\n\n👇 応募先リンクはリプライ欄に記載\n#{item.get('sns_genre','限定品')} #定価購入 #抽選速報"
                 tw_rep = "【受付リンク】\n" + "\n".join([f"・{s.get('site_name')}: {s.get('url')}" for s in sites[:2]])
                 st.text_area("本文", tw_main, height=120, key=f"tw_m_{item['id']}")
                 st.link_button("👉 𝕏 投稿画面へ", f"https://twitter.com/intent/tweet?text={up.quote(tw_main)}", use_container_width=True)
                 st.text_area("リプライ用", tw_rep, height=70, key=f"tw_r_{item['id']}")
         with cx2:
-            if st.button("🔄 相場再取得", key=f"r_{item['id']}", use_container_width=True):
+            if st.button("🔄 相場・締切再取得", key=f"r_{item['id']}", use_container_width=True):
                 d = call_gemini(item.get("name",""), item.get("url",""), item.get("sns_genre",""), "")
                 if d and isinstance(d, dict):
                     rp, mp = parse_num(d.get("retail_price"), item.get("retail_price",5000)), parse_num(d.get("market_price"), item.get("market_price",15000))
-                    update_db(item["id"], {"retail_price": rp, "market_price": mp, "profit": mp - int(mp * 0.1) - 750 - rp, "trust_score": parse_num(d.get("trust_score"), 70), "trust_reason": d.get("trust_reason") or "更新", "updated_at": today})
+                    new_dl = d.get("deadline")
+                    for s in sites:
+                        if new_dl and not s.get("deadline_date"): s["deadline_date"] = new_dl
+                    update_db(item["id"], {"retail_price": rp, "market_price": mp, "profit": mp - int(mp * 0.1) - 750 - rp, "sites": sites, "trust_score": parse_num(d.get("trust_score"), 70), "trust_reason": d.get("trust_reason") or "再取得", "updated_at": today})
                     st.rerun()
 
         kw = up.quote(item.get("name",""))
@@ -212,13 +223,14 @@ for item in fil_items:
 
         for idx, s in enumerate(sites):
             with st.container(border=True):
-                st.write(f"🔗 **{s.get('site_name')}**")
+                cur_dl_txt = s.get("deadline_date") or "未設定"
+                st.write(f"🔗 **{s.get('site_name')}** (締切: `{cur_dl_txt}`)")
                 cs_st, cs_dt = st.columns(2)
                 cur_st = s.get("status", "未応募")
                 nst = cs_st.selectbox("状況", ["未応募", "応募中", "当選", "落選"], index=["未応募", "応募中", "当選", "落選"].index(cur_st) if cur_st in ["未応募", "応募中", "当選", "落選"] else 0, key=f"s_{item['id']}_{idx}")
-                d_val = parse_date_safe(s.get("deadline_date"), today_d)
-                nd = cs_dt.date_input("締切", value=d_val, key=f"dt_{item['id']}_{idx}").strftime("%Y-%m-%d")
-                if nst != cur_st or nd != s.get("deadline_date"):
+                d_val = parse_date_safe(s.get("deadline_date")) or today_d
+                nd = cs_dt.date_input("締切編集", value=d_val, key=f"dt_{item['id']}_{idx}").strftime("%Y-%m-%d")
+                if nst != cur_st or (s.get("deadline_date") and nd != s.get("deadline_date")):
                     s["status"], s["deadline_date"], s["updated_at"] = nst, nd, today
                     update_db(item["id"], {"sites": sites, "updated_at": today})
                     st.rerun()
