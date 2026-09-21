@@ -97,7 +97,7 @@ def delete_from_db(item_id):
             pass
     st.session_state.monitored_items = [x for x in st.session_state.monitored_items if str(x.get("id")) != str(item_id)]
 
-# 主要ショップの検索リンク補完ジェネレーター（締切目安日を付与）
+# 主要ショップの検索リンク補完ジェネレーター
 def get_default_platform_links(item_name, genre, base_deadline):
     encoded = urllib.parse.quote(item_name)
     links = []
@@ -394,7 +394,6 @@ for item in items:
     elif not isinstance(raw_sites, list):
         raw_sites = []
 
-    # 既存の「随時更新」を実際の日付に自動置換
     updated_needed = False
     if not raw_sites:
         p_name = item.get("name", "")
@@ -481,11 +480,10 @@ else:
             updated_sites = False
             for s_idx, s in enumerate(sites_list):
                 with st.container():
+                    site_target_url = s.get("url") if s.get("url") else "https://google.com"
                     st.markdown(f"""
                     <div class='site-card'>
                         <strong>🔗 {s.get('site_name', '受付サイト')}</strong><br>
                         <span class='date-text'>初回記載日: {s.get('created_at', '-')} ｜ 更新日: {s.get('updated_at', '-')} ｜ 締切日: <b>{s.get('deadline_date', '未設定')}</b></span>
                     </div>
-                    """, unsafe_allow_html=True)
-
-             
+       
