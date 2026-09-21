@@ -36,6 +36,17 @@ def clean_url(raw_text):
     m = re.search(r'https?://[^\s)\]"]+', str(raw_text))
     return m.group(0) if m else str(raw_text).strip()
 
+def get_smart_name(raw_name, raw_url):
+    u = clean_url(raw_url).lower()
+    if raw_name and raw_name not in ["速報サイト", "特設サイト", ""]:
+        return raw_name[:14]
+    if "megane" in u or "yugio" in u: return "眼鏡市場×遊戯王"
+    if "0101" in u or "marui" in u or "palworld" in u or "akhz" in u: return "丸井パルワールド"
+    if "bandai" in u: return "プレバン特設"
+    if "snkrdunk" in u: return "スニダン速報"
+    d = up.urlparse(u).netloc.replace("www.", "")
+    return d[:14] if d else "特設サイト"
+
 def load_db():
     if sb:
         try:
@@ -74,11 +85,7 @@ def load_custom_rss():
 def add_custom_rss(name, raw_input):
     target_url = clean_url(raw_input)
     if not target_url or not target_url.startswith("http"): return
-    if name and name.strip():
-        final_name = name.strip()[:18]
-    else:
-        domain = up.urlparse(target_url).netloc.replace("www.", "")
-        final_name = "丸井/パルワールド" if "0101" in target_url or "AKhZ" in target_url else ("眼鏡市場 遊戯王" if "megane" in target_url else domain[:15] or "特設サイト")
+    final_name = get_smart_name(name, target_url)
     it = {"id": f"rss_{int(time.time()*1000)}", "name": final_name, "url": target_url, "sns_genre": "カスタムRSS"}
     if sb:
         try:
@@ -159,10 +166,11 @@ def fetch_all_feeds(custom_list):
         u = clean_url(cr.get("url", ""))
         if not u or not u.startswith("http"): continue
         cf = feedparser.parse(u)
+        name_label = get_smart_name(cr.get('name'), u)
         if cf.entries:
-            for ce in cf.entries[:3]: hits.append({"name": f"【{cr['name']}】{ce.title}", "url": ce.link, "genre": "ホビー", "summary": getattr(ce, "summary", "")})
+            for ce in cf.entries[:3]: hits.append({"name": f"【{name_label}】{ce.title}", "url": ce.link, "genre": "ホビー", "summary": getattr(ce, "summary", "")})
         else:
-            hits.append({"name": f"【特設】{cr['name']}", "url": u, "genre": "ホビー", "summary": "特設ページ直接解析"})
+            hits.append({"name": f"【特設】{name_label}", "url": u, "genre": "ホビー", "summary": "特設ページ直接解析"})
     return hits
 
 st.subheader("🎯 プレ値パトロール")
@@ -200,7 +208,7 @@ with c_btn1:
 with c_btn2:
     with st.popover("➕ 特設・速報サイト登録"):
         st.caption("特設サイトURLやブログRSSを登録")
-        r_name = st.text_input("サイト名 (例: パルワールド 渋谷)")
+        r_name = st.text_input("サイト名 (例: 眼鏡市場 遊戯王)")
         r_url = st.text_input("URL (特設LPまたはRSS)")
         if st.button("登録する", use_container_width=True) and r_url:
             add_custom_rss(r_name, r_url)
@@ -211,10 +219,10 @@ with c_btn2:
             for cf_item in custom_feeds:
                 cc1, cc2 = st.columns([3, 1])
                 target_url = clean_url(cf_item.get('url', ''))
-                raw_title = cf_item.get('name') or "特設サイト"
-                disp_title = (raw_title[:14] + "…") if len(raw_title) > 14 else raw_title
-                if target_url.startswith("http"): cc1.link_button(f"👉 {disp_title}", target_url, use_container_width=True)
-                else: cc1.write(f"・{disp_title}")
+                # DBに古い「速報サイト」が入っていてもURLから自動でスマートに命名
+                smart_title = get_smart_name(cf_item.get('name'), target_url)
+                if target_url.startswith("http"): cc1.link_button(f"👉 {smart_title}", target_url, use_container_width=True)
+                else: cc1.write(f"・{smart_title}")
                 if cc2.button("削除", key=f"del_rss_{cf_item['id']}"):
                     del_custom_rss(cf_item["id"])
                     st.rerun()
