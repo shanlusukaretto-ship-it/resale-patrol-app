@@ -67,7 +67,8 @@ def load_custom_rss():
 
 def add_custom_rss(name, url):
     if not url: return
-    it = {"id": f"rss_{int(time.time())}", "name": name or "速報サイト", "url": url, "sns_genre": "カスタムRSS"}
+    auto_name = name.strip() if name and name.strip() else up.urlparse(url).netloc.replace("www.", "") or "特設サイト"
+    it = {"id": f"rss_{int(time.time()*1000)}", "name": auto_name, "url": url.strip(), "sns_genre": "カスタムRSS"}
     if sb:
         try:
             sb.table("items").insert(it).execute()
@@ -83,15 +84,15 @@ def del_custom_rss(i_id):
             return
         except: pass
     if "custom_rss" in st.session_state:
-        st.session_state.custom_rss = [x for x in st.session_state.custom_rss if x.get("id") != i_id]
+        st.session_state.custom_rss = [x for x in st.session_state.custom_rss if str(x.get("id")) != str(i_id)]
 
 def fetch_web_text(url):
     try:
         req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'})
-        with urllib.request.urlopen(req, timeout=4) as response:
+        with urllib.request.urlopen(req, timeout=5) as response:
             html = response.read().decode('utf-8', errors='ignore')
             text = re.sub(r'<[^>]+>', ' ', html)
-            return ' '.join(text.split())[:1500]
+            return ' '.join(text.split())[:1800]
     except:
         return ""
 
@@ -103,12 +104,12 @@ def get_links(n, g):
             {"site_name": "阪急うめだコスメ", "url": f"https://web.hh-online.jp/hankyu-beauty/goods/list.html?shop=hb&keyword={e}", "deadline_date": None},
             {"site_name": "アットコスメ", "url": f"https://www.cosme.com/products/list.php?name={e}", "deadline_date": None}
         ]
-    if any(k in t for k in ["TCG", "ポケカ", "ワンピ", "ドラゴンボール"]):
+    if any(k in t for k in ["TCG", "ポケカ", "ワンピ", "ドラゴンボール", "遊戯王"]):
         res = [{"site_name": "あみあみ（予約抽選）", "url": f"https://www.amiami.jp/top/page/c/search.html?s_keywords={e}", "deadline_date": None},
                {"site_name": "ヨドバシ", "url": f"https://www.yodobashi.com/?word={e}", "deadline_date": None},
                {"site_name": "スニダン相場", "url": f"https://snkrdunk.com/search?keywords={e}", "deadline_date": None}]
         if "ポケ" in t: res.insert(0, {"site_name": "ポケセン", "url": f"https://www.pokemoncenter-online.com/?main_page=product_list&keyword={e}", "deadline_date": None})
-        elif "ドラゴンボール" in t: res.insert(0, {"site_name": "プレバン公式", "url": f"https://p-bandai.jp/chara/c0005/?keyword={e}", "deadline_date": None})
+        elif "ドラゴンボール" in t or "プレバン" in t: res.insert(0, {"site_name": "プレバン公式", "url": f"https://p-bandai.jp/chara/c0005/?keyword={e}", "deadline_date": None})
         return res
     if "プレバン" in t: return [{"site_name": "プレバン公式", "url": f"https://p-bandai.jp/chara/c0001/?keyword={e}", "deadline_date": None}]
     if any(k in t for k in ["スニーカー", "NIKE", "SNKRS"]): return [{"site_name": "SNKRS", "url": f"https://www.nike.com/jp/w?q={e}", "deadline_date": None}]
@@ -116,12 +117,12 @@ def get_links(n, g):
     return [{"site_name": "公式情報元", "url": "https://google.com", "deadline_date": None}]
 
 def call_gemini(n, u, g, r):
-    if not gk or any(bw in n or bw in r for bw in ["車", "自動車", "バイク", "タイヤ"]): return None
+    if not gk: return None
     body_txt = fetch_web_text(u) if u.startswith("http") else ""
-    ctx = f"{r} {body_txt}"[:1800]
+    ctx = f"{r} {body_txt}"[:2000]
     try:
         td = dt.date.today().strftime("%Y-%m-%d")
-        p = f"本日は{td}。限定品アナリストとして定価,相場,受付締切日(YYYY-MM-DD),信頼度(0-100),理由をJSON出力。締切日が本文から正確に分からない場合はnullにすること。対象:{n},{u},{g},{ctx}。形式:{{\"standard_name\":\"商品名\",\"retail_price\":5000,\"market_price\":15000,\"deadline\":null,\"genre\":\"{g}\",\"trust_score\":85,\"trust_reason\":\"本文確認\",\"sites\":[{{\"site_name\":\"受付元\",\"url\":\"{u}\",\"deadline\":null}}]}}"
+        p = f"本日は{td}。限定品アナリストとして定価,予想相場,受付締切日(YYYY-MM-DD),信頼度(0-100),理由をJSON出力。締切日が本文から正確に分からない場合はnull。対象:{n},{u},{g},{ctx}。形式:{{\"standard_name\":\"商品名\",\"retail_price\":5000,\"market_price\":15000,\"deadline\":null,\"genre\":\"{g}\",\"trust_score\":85,\"trust_reason\":\"本文確認\",\"sites\":[{{\"site_name\":\"受付元\",\"url\":\"{u}\",\"deadline\":null}}]}}"
         res = genai.Client(api_key=gk).models.generate_content(model="gemini-3.6-flash", contents=p)
         return json.loads(res.text.strip().replace("```json","").replace("```","").strip())
     except: return None
@@ -130,7 +131,7 @@ def call_gemini_tweet_parse(tweet_text):
     if not gk: return None
     try:
         td = dt.date.today().strftime("%Y-%m-%d")
-        p = f"本日は{td}。以下のXポストや告知文から限定品情報を解析しJSON出力せよ。商品名、定価、予想相場、受付締切日(YYYY-MM-DD),リンクURL,ジャンル(TCG/プレバン/スニーカー/コフレ/ホビー/ソフビ/釣具/海外相場/カメラ/キャンプ/その他)。不明な締切やURLはnull。対象文:\n{tweet_text}\n形式:{{\"standard_name\":\"商品名\",\"retail_price\":5000,\"market_price\":15000,\"deadline\":null,\"genre\":\"コフレ\",\"url\":\"URLまたはnull\",\"trust_score\":95,\"trust_reason\":\"X/告知AI抽出\"}}"
+        p = f"本日は{td}。以下のXポストや告知文から限定品情報を解析しJSON出力せよ。商品名、定価、予想相場、受付締切日(YYYY-MM-DD),リンクURL,ジャンル(TCG/プレバン/スニーカー/コフレ/ホビー/ソフビ/釣具/海外相場/カメラ/キャンプ/その他)。不明な締切やURLはnull。対象文:\n{tweet_text}\n形式:{{\"standard_name\":\"商品名\",\"retail_price\":5000,\"market_price\":15000,\"deadline\":null,\"genre\":\"TCG\",\"url\":\"URLまたはnull\",\"trust_score\":95,\"trust_reason\":\"AI抽出\"}}"
         res = genai.Client(api_key=gk).models.generate_content(model="gemini-3.6-flash", contents=p)
         return json.loads(res.text.strip().replace("```json","").replace("```","").strip())
     except: return None
@@ -147,12 +148,17 @@ def fetch_all_feeds(custom_list):
     for q, g in qs:
         f = feedparser.parse(f"https://news.google.com/rss/search?q={up.quote(q)}&hl=ja&gl=JP&ceid=JP:ja")
         for e in f.entries[:2]: hits.append({"name": e.title, "url": e.link, "genre": g, "summary": getattr(e, "summary", "")})
+    
     for cr in custom_list:
-        try:
-            cf = feedparser.parse(cr["url"])
+        u = cr.get("url", "")
+        if not u: continue
+        cf = feedparser.parse(u)
+        if cf.entries:
             for ce in cf.entries[:3]:
-                hits.append({"name": f"【{cr['name']}】{ce.title}", "url": ce.link, "genre": "コフレ" if "コフレ" in cr['name'] else "ホビー", "summary": getattr(ce, "summary", "")})
-        except: pass
+                hits.append({"name": f"【{cr['name']}】{ce.title}", "url": ce.link, "genre": "ホビー", "summary": getattr(ce, "summary", "")})
+        else:
+            # RSSではない特設サイトLPの場合、直接そのURLをターゲットに設定
+            hits.append({"name": f"【特設】{cr['name']}", "url": u, "genre": "ホビー", "summary": "特設ページ直接解析"})
     return hits
 
 st.subheader("🎯 プレ値パトロール")
@@ -162,37 +168,37 @@ today = today_d.strftime("%Y-%m-%d")
 custom_feeds = load_custom_rss()
 
 with st.container(border=True):
-    st.write("⚡ **Xポスト・告知文をAI解析して巡回追加**")
+    st.write("⚡ **Xポスト・告知文・特設LPをAI解析して巡回追加**")
     with st.form("x_parse_form", clear_on_submit=True):
-        tw_input = st.text_area("Xの投稿や告知文をそのまま貼り付け", placeholder="【予約開始】コスメデコルテ クリスマスコフレ2026の抽選受付がスタート！定価8,800円、締切は10月15日まで。受付URL: https://...", height=80)
+        tw_input = st.text_area("X投稿や告知文、または特設ページの紹介文を貼り付け", placeholder="例：【予約開始】眼鏡市場×遊戯王コラボメガネが限定登場！価格19,800円、受注受付は〇月〇日まで。URL: https://...", height=80)
         if st.form_submit_button("🚀 AI解析してリストに追加", use_container_width=True) and tw_input.strip():
-            with st.spinner("AIがポストを高速解析中..."):
+            with st.spinner("AIが解析中..."):
                 parsed = call_gemini_tweet_parse(tw_input)
                 if parsed and isinstance(parsed, dict):
-                    p_name = parsed.get("standard_name") or "X解析アイテム"
-                    p_url = parsed.get("url") or "https://x.com"
+                    p_name = parsed.get("standard_name") or "解析アイテム"
+                    p_url = parsed.get("url") or "https://google.com"
                     p_genre = parsed.get("genre") or "その他"
                     p_rp = parse_num(parsed.get("retail_price"), 5000)
                     p_mp = parse_num(parsed.get("market_price"), 15000)
                     p_pf = p_mp - int(p_mp * 0.1) - 750 - p_rp
                     p_mr = round((p_pf / p_mp) * 100, 1) if p_mp > 0 else 0
                     p_dl = parsed.get("deadline")
-                    sites = [{"site_name": "X告知元/受付", "url": p_url, "created_at": today, "updated_at": today, "deadline_date": p_dl, "status": "未応募"}]
+                    sites = [{"site_name": "告知・受付元", "url": p_url, "created_at": today, "updated_at": today, "deadline_date": p_dl, "status": "未応募"}]
                     for l in get_links(p_name, p_genre): sites.append({**l, "created_at": today, "updated_at": today, "status": "未応募"})
-                    save_db({"id": str(int(time.time()*1000)), "name": p_name, "url": p_url, "retail_price": p_rp, "market_price": p_mp, "profit": p_pf, "margin_rate": p_mr, "break_even": int((p_rp+750)/0.9), "sns_genre": p_genre, "trust_score": 95, "trust_reason": "X/告知AI抽出", "created_at": today, "updated_at": today, "sites": sites})
+                    save_db({"id": str(int(time.time()*1000)), "name": p_name, "url": p_url, "retail_price": p_rp, "market_price": p_mp, "profit": p_pf, "margin_rate": p_mr, "break_even": int((p_rp+750)/0.9), "sns_genre": p_genre, "trust_score": 95, "trust_reason": "告知AI抽出", "created_at": today, "updated_at": today, "sites": sites})
                     st.toast(f"✅ 追加完了: {p_name}")
                     time.sleep(0.3)
                     st.rerun()
 
 c_btn1, c_btn2 = st.columns([2, 1])
 with c_btn1:
-    btn_run = st.button("🔄 最新情報を高速巡回（コフレ・カスタム巡回含む）", use_container_width=True)
+    btn_run = st.button("🔄 最新情報を高速巡回（特設サイト巡回含む）", use_container_width=True)
 with c_btn2:
-    with st.popover("➕ 速報サイト追加"):
-        st.caption("好きなブログや速報RSSを追加")
-        r_name = st.text_input("サイト名 (例: コフレ速報)")
-        r_url = st.text_input("RSS/ブログURL")
-        if st.button("登録する", use_container_width=True):
+    with st.popover("➕ 特設・速報サイト登録"):
+        st.caption("特設サイトURLやブログRSSを登録")
+        r_name = st.text_input("サイト名 (例: 眼鏡市場 遊戯王)")
+        r_url = st.text_input("URL (特設LPまたはRSS)")
+        if st.button("登録する", use_container_width=True) and r_url:
             add_custom_rss(r_name, r_url)
             st.rerun()
         if custom_feeds:
@@ -200,7 +206,9 @@ with c_btn2:
             st.caption("登録中カスタムサイト:")
             for cf_item in custom_feeds:
                 cc1, cc2 = st.columns([3, 1])
-                cc1.write(f"・{cf_item.get('name')}")
+                disp_url = cf_item.get('url', '')
+                short_u = disp_url[:22] + "..." if len(disp_url) > 22 else disp_url
+                cc1.markdown(f"**{cf_item.get('name')}**\n`{short_u}`")
                 if cc2.button("削除", key=f"del_rss_{cf_item['id']}"):
                     del_custom_rss(cf_item["id"])
                     st.rerun()
@@ -293,7 +301,7 @@ for item in fil_items:
                 stars = "★★★★★" if pv >= 30000 else "★★★★☆" if pv >= 10000 else "★★★☆☆"
                 dl_found = [s.get("deadline_date") for s in sites if s.get("deadline_date")]
                 dl_str = min(dl_found) if dl_found else "公式アナウンス確認推奨"
-                tw_main = f"【定価購入アラート🚨】\n二次流通でのプレ値高騰が予想される注目アイテムです。定価で手に入れたい方は公式受付をお見逃しなく！\n\n📦 {item.get('name','')}\n・定価目安: ¥{parse_num(item.get('retail_price'), 0):,}\n・注目度: {stars}（市場目安: 約¥{parse_num(item.get('market_price'), 0):,}〜）\n\n⏰ 締切目安: {dl_str}\n⚠️ 忘れ防止に【ブックマーク🔖】推奨\n\n👇 応募先リンクはリプライ欄に記載\n#{item.get('sns_genre','限定品')} #クリスマスコフレ #定価購入"
+                tw_main = f"【定価購入アラート🚨】\n二次流通でのプレ値高騰が予想される注目アイテムです。定価で手に入れたい方は公式受付をお見逃しなく！\n\n📦 {item.get('name','')}\n・定価目安: ¥{parse_num(item.get('retail_price'), 0):,}\n・注目度: {stars}（市場目安: 約¥{parse_num(item.get('market_price'), 0):,}〜）\n\n⏰ 締切目安: {dl_str}\n⚠️ 忘れ防止に【ブックマーク🔖】推奨\n\n👇 応募先リンクはリプライ欄に記載\n#{item.get('sns_genre','限定品')} #定価購入 #抽選速報"
                 tw_rep = "【受付リンク】\n" + "\n".join([f"・{s.get('site_name')}: {s.get('url')}" for s in sites[:2]])
                 st.text_area("本文", tw_main, height=120, key=f"tw_m_{item['id']}")
                 st.link_button("👉 𝕏 投稿画面へ", f"https://twitter.com/intent/tweet?text={up.quote(tw_main)}", use_container_width=True)
