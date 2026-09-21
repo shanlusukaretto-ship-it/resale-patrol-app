@@ -202,7 +202,6 @@ with col_btn1:
                     margin = round((profit / f_market) * 100, 1) if f_market > 0 else 0
                     break_even = int((f_retail + 750) / 0.90)
 
-                    # 申込みサイトデータ
                     site_entry = {
                         "site_name": parsed.get("site_name", "公式/速報サイト"),
                         "url": parsed["url"],
@@ -212,11 +211,9 @@ with col_btn1:
                         "status": "未応募"
                     }
 
-                    # 同名商品が既に存在するか確認
                     matched_item = next((it for it in all_items if it.get("name") == parsed["name"]), None)
                     
                     if matched_item:
-                        # 既存商品にサイトを追加
                         current_sites = matched_item.get("sites") or []
                         current_sites.append(site_entry)
                         update_item_in_db(matched_item["id"], {
@@ -224,7 +221,6 @@ with col_btn1:
                             "updated_at": today_str
                         })
                     else:
-                        # 新規商品として登録
                         new_record = {
                             "id": str(int(datetime.datetime.now().timestamp()) + new_count),
                             "name": parsed["name"],
@@ -313,7 +309,6 @@ if not items:
 else:
     for item in items:
         raw_sites = item.get("sites") or []
-        # レガシーデータの救済
         if not raw_sites and item.get("url"):
             raw_sites = [{
                 "site_name": "公式受付",
@@ -333,11 +328,11 @@ else:
         updated_dt = item.get("updated_at", "-")
         applying_badge = "<span class='badge-applying'>応募中あり</span>" if has_applying else ""
 
-        title_header = f"{item.get('name')} （利益見込: +{item.get('profit', 0):,} 円）"
+        profit_val = item.get("profit", 0)
+        profit_display = f"+{profit_val:,}円" if profit_val else ""
+        expander_title = f"📦 {item.get('name', '未設定')}　{profit_display}"
 
-        # 商品トップ（タップで展開するExpander）
-        with st.expander(f"📦 {item.get('name')}　{'+' + str(f'{item.get(\"profit\", 0):,}') + '円' if item.get('profit') else ''}", expanded=False):
-            # トップ概要
+        with st.expander(expander_title, expanded=False):
             col_info, col_del = st.columns([5, 1])
             with col_info:
                 st.markdown(f"**ジャンル**: <span class='badge-genre'>{item.get('sns_genre', '一般')}</span> {applying_badge}", unsafe_allow_html=True)
@@ -347,18 +342,15 @@ else:
                     delete_from_db(item["id"])
                     st.rerun()
 
-            # 価格情報サマリー
             m1, m2, m3, m4 = st.columns(4)
             m1.metric("定価", f"¥{item.get('retail_price', 0):,}")
             m2.metric("予想相場", f"¥{item.get('market_price', 0):,}")
             m3.metric("見込み利益", f"¥{item.get('profit', 0):,}", f"{item.get('margin_rate', 0)}%")
             m4.metric("損益分岐", f"¥{item.get('break_even', 0):,}")
 
-            # 相場クイックアクセス
             kw = urllib.parse.quote(item.get("name", ""))
             q_col1, q_col2 = st.columns(2)
             q_col1.link_button("👟 スニダン相場を確認", f"https://snkrdunk.com/search?keywords={kw}", use_container_width=True)
-            # メルカリ：売り切れのみ（status=sold_out）絞り込みパラメータ付き
             q_col2.link_button("🔴 メルカリ直近落札相場", f"https://jp.mercari.com/search?keyword={kw}&status=sold_out", use_container_width=True)
 
             st.markdown("#### 📝 申込み・抽選サイト一覧")
@@ -376,10 +368,12 @@ else:
                     c_status, c_link = st.columns([2, 2])
                     with c_status:
                         current_st = s.get("status", "未応募")
+                        status_list = ["未応募", "応募中", "当選", "落選"]
+                        idx_val = status_list.index(current_st) if current_st in status_list else 0
                         new_st = st.selectbox(
                             "応募ステータス",
-                            ["未応募", "応募中", "当選", "落選"],
-                            index=["未応募", "応募中", "当選", "落選"].index(current_st) if current_st in ["未応募", "応募中", "当選", "落選"] else 0,
+                            status_list,
+                            index=idx_val,
                             key=f"status_{item['id']}_{s_idx}"
                         )
                         if new_st != current_st:
