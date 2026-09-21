@@ -10,8 +10,8 @@ gk = st.secrets.get("GEMINI_API_KEY", "")
 su, sk = st.secrets.get("SUPABASE_URL", ""), st.secrets.get("SUPABASE_KEY", "")
 sb = create_client(su, sk) if su and sk else None
 
-if "items" not in st.session_state:
-    st.session_state.items = []
+if "items_list" not in st.session_state:
+    st.session_state.items_list = []
 
 ICONS = {"TCG":"🃏","プレバン":"🤖","スニーカー":"👟","ホビー":"🧸","ソフビ":"🧸","釣具":"🎣","海外相場":"🌎","カメラ":"📷","キャンプ":"⛺"}
 
@@ -35,7 +35,7 @@ def load_db():
             res = sb.table("items").select("*").order("id", desc=True).execute().data
             if isinstance(res, list): return res
         except: pass
-    return st.session_state.get("items", [])
+    return st.session_state.items_list
 
 def save_db(it):
     if sb:
@@ -43,9 +43,7 @@ def save_db(it):
             sb.table("items").insert(it).execute()
             return
         except: pass
-    if "items" not in st.session_state or not isinstance(st.session_state.items, list):
-        st.session_state.items = []
-    st.session_state.items = [it] + st.session_state.items
+    st.session_state.items_list = [it] + [x for x in st.session_state.items_list if x.get("id") != it.get("id")]
 
 def update_db(i_id, data):
     if sb:
@@ -56,8 +54,7 @@ def del_db(i_id):
     if sb:
         try: sb.table("items").delete().eq("id", i_id).execute()
         except: pass
-    if "items" in st.session_state and isinstance(st.session_state.items, list):
-        st.session_state.items = [x for x in st.session_state.items if str(x.get("id")) != str(i_id)]
+    st.session_state.items_list = [x for x in st.session_state.items_list if str(x.get("id")) != str(i_id)]
 
 def fetch_web_text(url):
     try:
@@ -179,6 +176,8 @@ with c2:
                 "sites": sites
             }
             save_db(new_item)
+            st.success("登録完了！")
+            time.sleep(0.3)
             st.rerun()
 
 st.markdown("---")
