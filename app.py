@@ -97,30 +97,30 @@ def delete_from_db(item_id):
             pass
     st.session_state.monitored_items = [x for x in st.session_state.monitored_items if str(x.get("id")) != str(item_id)]
 
-# 主要ショップの検索リンク補完ジェネレーター
-def get_default_platform_links(item_name, genre):
+# 主要ショップの検索リンク補完ジェネレーター（締切目安日を付与）
+def get_default_platform_links(item_name, genre, base_deadline):
     encoded = urllib.parse.quote(item_name)
     links = []
     g_str = str(genre) + str(item_name)
     
     if any(k in g_str for k in ["TCG", "ポケカ", "ポケモン", "ワンピース"]):
-        links.append({"site_name": "ポケモンセンターオンライン（抽選・販売）", "url": f"https://www.pokemoncenter-online.com/?main_page=product_list&keyword={encoded}", "deadline_date": "随時更新"})
-        links.append({"site_name": "あみあみ（抽選・予約）", "url": f"https://www.amiami.jp/top/page/c/search.html?s_keywords={encoded}", "deadline_date": "随時更新"})
-        links.append({"site_name": "セブンネットショッピング", "url": f"https://7net.omni7.jp/search/?keyword={encoded}", "deadline_date": "随時更新"})
-        links.append({"site_name": "ヨドバシ・ドット・コム", "url": f"https://www.yodobashi.com/?word={encoded}", "deadline_date": "随時更新"})
-        links.append({"site_name": "スニダン（トレカ相場・出品）", "url": f"https://snkrdunk.com/search?keywords={encoded}", "deadline_date": "随時更新"})
+        links.append({"site_name": "ポケモンセンターオンライン（抽選・販売）", "url": f"https://www.pokemoncenter-online.com/?main_page=product_list&keyword={encoded}", "deadline_date": base_deadline})
+        links.append({"site_name": "あみあみ（抽選・予約）", "url": f"https://www.amiami.jp/top/page/c/search.html?s_keywords={encoded}", "deadline_date": base_deadline})
+        links.append({"site_name": "セブンネットショッピング", "url": f"https://7net.omni7.jp/search/?keyword={encoded}", "deadline_date": base_deadline})
+        links.append({"site_name": "ヨドバシ・ドット・コム", "url": f"https://www.yodobashi.com/?word={encoded}", "deadline_date": base_deadline})
+        links.append({"site_name": "スニダン（トレカ相場・出品）", "url": f"https://snkrdunk.com/search?keywords={encoded}", "deadline_date": base_deadline})
     elif any(k in g_str for k in ["プレバン", "バンダイ", "フィギュア"]):
-        links.append({"site_name": "プレミアムバンダイ公式", "url": f"https://p-bandai.jp/chara/c0001/?utm_source=search&keyword={encoded}", "deadline_date": "随時更新"})
-        links.append({"site_name": "あみあみ公式", "url": f"https://www.amiami.jp/top/page/c/search.html?s_keywords={encoded}", "deadline_date": "随時更新"})
-        links.append({"site_name": "ビックカメラ.com", "url": f"https://www.biccamera.com/bc/category/?q={encoded}", "deadline_date": "随時更新"})
+        links.append({"site_name": "プレミアムバンダイ公式", "url": f"https://p-bandai.jp/chara/c0001/?utm_source=search&keyword={encoded}", "deadline_date": base_deadline})
+        links.append({"site_name": "あみあみ公式", "url": f"https://www.amiami.jp/top/page/c/search.html?s_keywords={encoded}", "deadline_date": base_deadline})
+        links.append({"site_name": "ビックカメラ.com", "url": f"https://www.biccamera.com/bc/category/?q={encoded}", "deadline_date": base_deadline})
     elif any(k in g_str for k in ["ソフビ", "ホビー"]):
-        links.append({"site_name": "まんだらけ公式（ソフビ）", "url": f"https://order.mandarake.co.jp/order/listPage/list?keyword={encoded}", "deadline_date": "随時更新"})
-        links.append({"site_name": "墓場の画廊", "url": "https://store.hakabanogarou.jp/shopbrand/ct10/", "deadline_date": "随時更新"})
-        links.append({"site_name": "メディコム・トイ公式", "url": "http://www.medicomtoy.co.jp/", "deadline_date": "随時更新"})
+        links.append({"site_name": "まんだらけ公式（ソフビ）", "url": f"https://order.mandarake.co.jp/order/listPage/list?keyword={encoded}", "deadline_date": base_deadline})
+        links.append({"site_name": "墓場の画廊", "url": "https://store.hakabanogarou.jp/shopbrand/ct10/", "deadline_date": base_deadline})
+        links.append({"site_name": "メディコム・トイ公式", "url": "http://www.medicomtoy.co.jp/", "deadline_date": base_deadline})
     else:
-        links.append({"site_name": "SNKRS / Nike公式", "url": f"https://www.nike.com/jp/w?q={encoded}", "deadline_date": "随時更新"})
-        links.append({"site_name": "スニダン（スニーカー相場）", "url": f"https://snkrdunk.com/search?keywords={encoded}", "deadline_date": "随時更新"})
-        links.append({"site_name": "KITH TOKYO / atmos", "url": f"https://www.google.com/search?q={encoded}+抽選", "deadline_date": "随時更新"})
+        links.append({"site_name": "SNKRS / Nike公式", "url": f"https://www.nike.com/jp/w?q={encoded}", "deadline_date": base_deadline})
+        links.append({"site_name": "スニダン（スニーカー相場）", "url": f"https://snkrdunk.com/search?keywords={encoded}", "deadline_date": base_deadline})
+        links.append({"site_name": "KITH TOKYO / atmos", "url": f"https://www.google.com/search?q={encoded}+抽選", "deadline_date": base_deadline})
     return links
 
 # --- AI解析エンジン（Gemini 3.6 Flash） ---
@@ -130,11 +130,14 @@ def analyze_master_intelligence(name, url, genre, raw_text=""):
 
     try:
         client = genai.Client(api_key=gemini_key)
-        today_str = datetime.date.today().strftime("%Y-%m-%d")
+        today = datetime.date.today()
+        today_str = today.strftime("%Y-%m-%d")
+        default_deadline = (today + datetime.timedelta(days=7)).strftime("%Y-%m-%d")
         
         prompt = f"""
 本日は {today_str} です。限定アイテム（TCG・ソフビ・プレバン・ホビー・スニーカー）の専門アナリストとして情報解析を行ってください。
-情報から「統一された正式商品名」「定価」「予想相場」および、本文に記載されている【すべての応募・予約受付サイトや店舗】をリストで抽出してください。
+情報から「統一された正式商品名」「定価」「予想相場」および、本文に記載されている【すべての応募・予約受付サイトや店舗、それぞれの締切日（YYYY-MM-DD形式）】を抽出してください。
+本文中に明確な締切日がない場合は、受付開始から概ね1週間後の日付（例: {default_deadline}）を推計して設定してください。「随時更新」などの曖昧な文字列は禁止し、必ず YYYY-MM-DD 形式の日付にしてください。
 必ず以下の純粋なJSONフォーマットのみを出力してください。
 
 【対象】
@@ -148,13 +151,14 @@ def analyze_master_intelligence(name, url, genre, raw_text=""):
   "standard_name": "商品名（統一名称・25文字以内）",
   "retail_price": 5500,
   "market_price": 12000,
+  "estimated_deadline": "{default_deadline}",
   "rating": "S",
   "comment": "注目案件・即完売必至",
   "extracted_sites": [
     {{
       "site_name": "店舗名・サイト名",
       "url": "{url}",
-      "deadline_date": "{today_str}"
+      "deadline_date": "{default_deadline}"
     }}
   ]
 }}
@@ -206,7 +210,9 @@ with col_btn1:
         crawler_hits = fetch_patrol_targets()
         total_steps = len(crawler_hits) if crawler_hits else 1
         all_items = load_db()
-        today_str = datetime.date.today().strftime("%Y-%m-%d")
+        today = datetime.date.today()
+        today_str = today.strftime("%Y-%m-%d")
+        fallback_deadline = (today + datetime.timedelta(days=7)).strftime("%Y-%m-%d")
         new_count = 0
         
         for idx, h in enumerate(crawler_hits):
@@ -222,19 +228,23 @@ with col_btn1:
                 profit = f_market - int(f_market * 0.10) - 750 - f_retail
                 margin = round((profit / f_market) * 100, 1) if f_market > 0 else 0
                 break_even = int((f_retail + 750) / 0.90)
+                main_deadline = parsed.get("estimated_deadline", fallback_deadline)
 
                 sites_to_add = []
                 for s in parsed.get("extracted_sites", []):
+                    s_d = s.get("deadline_date")
+                    if not s_d or s_d == "随時更新":
+                        s_d = main_deadline
                     sites_to_add.append({
                         "site_name": s.get("site_name", "公式・速報ページ"),
                         "url": s.get("url") or h["url"],
                         "created_at": today_str,
                         "updated_at": today_str,
-                        "deadline_date": s.get("deadline_date", "公式発表確認"),
+                        "deadline_date": s_d,
                         "status": "未応募"
                     })
                 
-                default_links = get_default_platform_links(prod_name, h["genre"])
+                default_links = get_default_platform_links(prod_name, h["genre"], main_deadline)
                 for d in default_links:
                     if not any(x["site_name"] == d["site_name"] for x in sites_to_add):
                         sites_to_add.append({
@@ -299,7 +309,7 @@ with col_btn1:
 
         progress_bar.empty()
         progress_text.empty()
-        st.success("巡回と受付サイトの自動更新が完了しました！")
+        st.success("巡回と締切日の更新が完了しました！")
         st.rerun()
 
 with col_btn2:
@@ -310,7 +320,10 @@ with col_btn2:
         in_genre = st.selectbox("ジャンル", ["TCG", "プレバン", "ソフビ", "スニーカー", "その他"])
         if st.button("登録する", use_container_width=True):
             if in_name or in_url or in_post:
-                today_str = datetime.date.today().strftime("%Y-%m-%d")
+                today = datetime.date.today()
+                today_str = today.strftime("%Y-%m-%d")
+                default_deadline = (today + datetime.timedelta(days=7)).strftime("%Y-%m-%d")
+
                 parsed = analyze_master_intelligence(in_name or in_post[:25], in_url, in_genre, raw_text=in_post)
                 prod_name = in_name if in_name else (parsed.get("standard_name") if parsed else in_post[:25])
                 
@@ -319,6 +332,7 @@ with col_btn2:
                 profit = f_market - int(f_market * 0.10) - 750 - f_retail
                 margin = round((profit / f_market) * 100, 1) if f_market > 0 else 0
                 break_even = int((f_retail + 750) / 0.90)
+                main_deadline = parsed.get("estimated_deadline", default_deadline) if parsed else default_deadline
 
                 sites = []
                 if in_url:
@@ -327,10 +341,10 @@ with col_btn2:
                         "url": in_url,
                         "created_at": today_str,
                         "updated_at": today_str,
-                        "deadline_date": "公式ページ参照",
+                        "deadline_date": main_deadline,
                         "status": "未応募"
                     })
-                for d in get_default_platform_links(prod_name, in_genre):
+                for d in get_default_platform_links(prod_name, in_genre, main_deadline):
                     sites.append({
                         "site_name": d["site_name"],
                         "url": d["url"],
@@ -365,9 +379,10 @@ st.markdown("---")
 # --- 商品一覧表示 ---
 items = load_db()
 
-# 既存データのsites自動復元・正規化処理
 normalized_items = []
-today_str = datetime.date.today().strftime("%Y-%m-%d")
+today = datetime.date.today()
+today_str = today.strftime("%Y-%m-%d")
+default_d = (today + datetime.timedelta(days=7)).strftime("%Y-%m-%d")
 
 for item in items:
     raw_sites = item.get("sites")
@@ -379,7 +394,8 @@ for item in items:
     elif not isinstance(raw_sites, list):
         raw_sites = []
 
-    # サイトが0件の場合は即座にデフォルトリンク群で救済復元
+    # 既存の「随時更新」を実際の日付に自動置換
+    updated_needed = False
     if not raw_sites:
         p_name = item.get("name", "")
         p_genre = item.get("sns_genre", "ホビー")
@@ -389,10 +405,10 @@ for item in items:
                 "url": item.get("url"),
                 "created_at": item.get("created_at", today_str),
                 "updated_at": item.get("updated_at", today_str),
-                "deadline_date": item.get("deadline_date", "公式参照"),
+                "deadline_date": default_d,
                 "status": "未応募"
             })
-        for d in get_default_platform_links(p_name, p_genre):
+        for d in get_default_platform_links(p_name, p_genre, default_d):
             raw_sites.append({
                 "site_name": d["site_name"],
                 "url": d["url"],
@@ -401,7 +417,14 @@ for item in items:
                 "deadline_date": d["deadline_date"],
                 "status": "未応募"
             })
-        # DBにも補正保存
+        updated_needed = True
+    else:
+        for s in raw_sites:
+            if s.get("deadline_date") in ["随時更新", "公式参照", "未定", None]:
+                s["deadline_date"] = default_d
+                updated_needed = True
+
+    if updated_needed:
         update_item_in_db(item["id"], {"sites": raw_sites})
 
     item["sites"] = raw_sites
@@ -461,33 +484,8 @@ else:
                     st.markdown(f"""
                     <div class='site-card'>
                         <strong>🔗 {s.get('site_name', '受付サイト')}</strong><br>
-                        <span class='date-text'>初回記載日: {s.get('created_at', '-')} ｜ 更新日: {s.get('updated_at', '-')} ｜ 締切日: <b>{s.get('deadline_date', '未定')}</b></span>
+                        <span class='date-text'>初回記載日: {s.get('created_at', '-')} ｜ 更新日: {s.get('updated_at', '-')} ｜ 締切日: <b>{s.get('deadline_date', '未設定')}</b></span>
                     </div>
                     """, unsafe_allow_html=True)
 
-                    c_status, c_link = st.columns([2, 2])
-                    with c_status:
-                        current_st = s.get("status", "未応募")
-                        status_list = ["未応募", "応募中", "当選", "落選"]
-                        idx_val = status_list.index(current_st) if current_st in status_list else 0
-                        new_st = st.selectbox(
-                            "応募ステータス",
-                            status_list,
-                            index=idx_val,
-                            key=f"status_{item['id']}_{s_idx}"
-                        )
-                        if new_st != current_st:
-                            s["status"] = new_st
-                            s["updated_at"] = datetime.date.today().strftime("%Y-%m-%d")
-                            updated_sites = True
-
-                    with c_link:
-                        st.write("")
-                        st.link_button("👉 受付ページへ飛ぶ", s.get("url", "https://google.com"), use_container_width=True)
-
-            if updated_sites:
-                update_item_in_db(item["id"], {
-                    "sites": sites_list,
-                    "updated_at": datetime.date.today().strftime("%Y-%m-%d")
-                })
-                st.rerun()
+             
