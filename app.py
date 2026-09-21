@@ -64,12 +64,17 @@ def del_db(i_id):
 def get_links(name, genre, dl):
     enc = urllib.parse.quote(name)
     g = str(genre) + str(name)
-    if any(k in g for k in ["TCG", "ポケカ", "ワンピース"]):
-        return [
-            {"site_name": "ポケモンセンターオンライン", "url": f"https://www.pokemoncenter-online.com/?main_page=product_list&keyword={enc}", "deadline_date": dl},
+    if any(k in g for k in ["TCG", "ポケカ", "ワンピース", "ドラゴンボール", "フュージョンワールド"]):
+        links = [
             {"site_name": "あみあみ（予約抽選）", "url": f"https://www.amiami.jp/top/page/c/search.html?s_keywords={enc}", "deadline_date": dl},
-            {"site_name": "ヨドバシ・ドット・コム", "url": f"https://www.yodobashi.com/?word={enc}", "deadline_date": dl}
+            {"site_name": "ヨドバシ・ドット・コム", "url": f"https://www.yodobashi.com/?word={enc}", "deadline_date": dl},
+            {"site_name": "スニダン（相場）", "url": f"https://snkrdunk.com/search?keywords={enc}", "deadline_date": dl}
         ]
+        if "ポケカ" in g or "ポケモン" in g:
+            links.insert(0, {"site_name": "ポケモンセンターオンライン", "url": f"https://www.pokemoncenter-online.com/?main_page=product_list&keyword={enc}", "deadline_date": dl})
+        elif "ドラゴンボール" in g or "プレバン" in g:
+            links.insert(0, {"site_name": "プレミアムバンダイ（カードダス公式）", "url": f"https://p-bandai.jp/chara/c0005/?utm_source=search&keyword={enc}", "deadline_date": dl})
+        return links
     elif any(k in g for k in ["プレバン", "バンダイ"]):
         return [
             {"site_name": "プレミアムバンダイ公式", "url": f"https://p-bandai.jp/chara/c0001/?utm_source=search&keyword={enc}", "deadline_date": dl},
@@ -129,10 +134,11 @@ def analyze_ai(name, url, genre, raw):
 
 def fetch_rss():
     hits = []
-    # 需要が多い順に巡回
+    # 需要順＋ドラゴンボールカード巡回
     qs = [
         ("ポケカ 抽選予約 予約開始", "TCG"),
         ("ワンピースカード 抽選予約 予約開始", "TCG"),
+        ("ドラゴンボール フュージョンワールド 抽選 予約", "TCG"),
         ("プレミアムバンダイ 受注開始 限定", "プレバン"),
         ("Nike SNKRS 抽選", "スニーカー"),
         ("ジャンプキャラクターズストア 受注", "ホビー"),
@@ -143,6 +149,7 @@ def fetch_rss():
         ("site:ameblo.jp DRT 抽選 販売", "釣具"),
         ("DRT タイニークラッシュ 抽選 予約", "釣具"),
         ("カーペンター ルアー 抽選 販売", "釣具"),
+        ("ドラゴンボール カード 鑑定 PSA 落札", "海外相場"),
         ("漫画 初版 BGS 落札", "海外相場"),
         ("海外相場 高騰 オークション", "海外相場"),
         ("富士フイルム 限定 カメラ 抽選", "カメラ"),
@@ -210,7 +217,6 @@ with c2:
     with st.popover("➕ 手動追加"):
         in_n = st.text_input("商品名")
         in_u = st.text_input("URL")
-        # 需要順に並び替え
         in_g = st.selectbox("ジャンル", ["TCG", "プレバン", "スニーカー", "ホビー", "ソフビ", "釣具", "海外相場", "カメラ", "キャンプ", "その他"])
         if st.button("登録", use_container_width=True):
             today = datetime.date.today().strftime("%Y-%m-%d")
@@ -242,10 +248,8 @@ for it in items:
     it["sites"] = s
     norm_items.append(it)
 
-# コントロールバー（ジャンル選択・並び替え）
 col_filt, col_sort = st.columns([1, 1])
 with col_filt:
-    # 需要順に並び替え
     genre_options = [
         "すべて",
         "🃏 TCG",
