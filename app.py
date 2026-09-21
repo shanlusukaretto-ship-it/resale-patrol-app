@@ -1,4 +1,5 @@
 import streamlit as st, datetime, urllib.parse, json, time, feedparser, re
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from google import genai
 from supabase import create_client, Client
 
@@ -16,16 +17,9 @@ if sb_url and sb_key:
 if "items" not in st.session_state: st.session_state.items = []
 
 GENRE_ICONS = {
-    "TCG": "🃏",
-    "プレバン": "🤖",
-    "スニーカー": "👟",
-    "ホビー": "🧸",
-    "ソフビ": "🧸",
-    "釣具": "🎣",
-    "海外相場": "🌎",
-    "カメラ": "📷",
-    "キャンプ": "⛺",
-    "その他": "📦"
+    "TCG": "🃏", "プレバン": "🤖", "スニーカー": "👟", "ホビー": "🧸",
+    "ソフビ": "🧸", "釣具": "🎣", "海外相場": "🌎", "カメラ": "📷",
+    "キャンプ": "⛺", "その他": "📦"
 }
 
 def get_genre_icon(genre_str):
@@ -112,48 +106,40 @@ def get_links(name, genre, dl):
             {"site_name": "GO OUT Online", "url": f"https://www.goout.jp/category/B001/?keyword={enc}", "deadline_date": dl},
             {"site_name": "ヤフオク（相場確認）", "url": f"https://auctions.yahoo.co.jp/search/search?p={enc}", "deadline_date": dl}
         ]
-    return [
-        {"site_name": "公式情報元", "url": "https://google.com", "deadline_date": dl}
-    ]
+    return [{"site_name": "公式情報元", "url": "https://google.com", "deadline_date": dl}]
 
-def analyze_ai(name, url, genre, raw):
+def call_gemini(name, url, genre, raw):
     if not gemini_key: return None
     bad_words = ["車", "自動車", "バイク", "タイヤ", "ホイール", "オートバイ", "カーナビ", "走行"]
-    if any(bw in name or bw in raw for bw in bad_words):
-        return None
+    if any(bw in name or bw in raw for bw in bad_words): return None
     try:
         c = genai.Client(api_key=gemini_key)
         today = datetime.date.today().strftime("%Y-%m-%d")
         dl = (datetime.date.today() + datetime.timedelta(days=7)).strftime("%Y-%m-%d")
-        p = f"本日は{today}。限定品・極小生産品（TCG・プレバン・ホビー・釣具・海外高騰等）のアナリストとして定価(仕入目安),予想相場(二次流通),受付元をJSON出力。自動車やバイク関連は絶対に除外。価格数値のみ。対象:{name},{url},{genre},{raw[:350]}。形式:{{\"standard_name\":\"商品名\",\"retail_price\":5000,\"market_price\":15000,\"deadline\":\"{dl}\",\"genre\":\"{genre}\",\"sites\":[{{\"site_name\":\"受付/情報元\",\"url\":\"{url}\",\"deadline\":\"{dl}\"}}]}}"
+        p = f"本日は{today}。限定品・極小生産品（TCG・プレバン・ホビー・釣具・海外高騰等）のアナリストとして定価(仕入目安),予想相場(二次流通),受付元をJSON出力。自動車やバイク関連は絶対に除外。価格数値のみ。対象:{name},{url},{genre},{raw[:300]}。形式:{{\"standard_name\":\"商品名\",\"retail_price\":5000,\"market_price\":15000,\"deadline\":\"{dl}\",\"genre\":\"{genre}\",\"sites\":[{{\"site_name\":\"受付/情報元\",\"url\":\"{url}\",\"deadline\":\"{dl}\"}}]}}"
         res = c.models.generate_content(model="gemini-3.6-flash", contents=p)
         txt = res.text.strip().replace("```json","").replace("```","").strip()
         data = json.loads(txt)
         return data if isinstance(data, dict) else None
     except: return None
 
+def analyze_ai_task(item_task):
+    h, gem_key = item_task
+    d = call_gemini(h["name"], h["url"], h["genre"], h["summary"])
+    return (h, d)
+
 def fetch_rss():
     hits = []
-    # 需要順＋ドラゴンボールカード巡回
     qs = [
-        ("ポケカ 抽選予約 予約開始", "TCG"),
-        ("ワンピースカード 抽選予約 予約開始", "TCG"),
-        ("ドラゴンボール フュージョンワールド 抽選 予約", "TCG"),
-        ("プレミアムバンダイ 受注開始 限定", "プレバン"),
-        ("Nike SNKRS 抽選", "スニーカー"),
-        ("ジャンプキャラクターズストア 受注", "ホビー"),
-        ("サンデープレミアムショップ 受注", "ホビー"),
-        ("TS-NEO ソフビ 抽選 限定", "ソフビ"),
-        ("当時物 ソフビ 落札", "ソフビ"),
-        ("site:ameblo.jp タイニークラッシュ 抽選 入荷", "釣具"),
-        ("site:ameblo.jp DRT 抽選 販売", "釣具"),
-        ("DRT タイニークラッシュ 抽選 予約", "釣具"),
-        ("カーペンター ルアー 抽選 販売", "釣具"),
-        ("ドラゴンボール カード 鑑定 PSA 落札", "海外相場"),
-        ("漫画 初版 BGS 落札", "海外相場"),
-        ("海外相場 高騰 オークション", "海外相場"),
-        ("富士フイルム 限定 カメラ 抽選", "カメラ"),
-        ("ライカ 特別限定 モデル 発売", "カメラ"),
+        ("ポケカ 抽選予約 予約開始", "TCG"), ("ワンピースカード 抽選予約 予約開始", "TCG"),
+        ("ドラゴンボール フュージョンワールド 抽選 予約", "TCG"), ("プレミアムバンダイ 受注開始 限定", "プレバン"),
+        ("Nike SNKRS 抽選", "スニーカー"), ("ジャンプキャラクターズストア 受注", "ホビー"),
+        ("サンデープレミアムショップ 受注", "ホビー"), ("TS-NEO ソフビ 抽選 限定", "ソフビ"),
+        ("当時物 ソフビ 落札", "ソフビ"), ("site:ameblo.jp タイニークラッシュ 抽選 入荷", "釣具"),
+        ("site:ameblo.jp DRT 抽選 販売", "釣具"), ("DRT タイニークラッシュ 抽選 予約", "釣具"),
+        ("カーペンター ルアー 抽選 販売", "釣具"), ("ドラゴンボール カード 鑑定 PSA 落札", "海外相場"),
+        ("漫画 初版 BGS 落札", "海外相場"), ("海外相場 高騰 オークション", "海外相場"),
+        ("富士フイルム 限定 カメラ 抽選", "カメラ"), ("ライカ 特別限定 モデル 発売", "カメラ"),
         ("ガレージブランド キャンプ 抽選 限定", "キャンプ")
     ]
     for q, g in qs:
@@ -169,48 +155,74 @@ with c1:
     if st.button("🔄 全自動で最新情報を巡回収集", use_container_width=True):
         p_text, p_bar = st.empty(), st.progress(0)
         hits = fetch_rss()
-        total = len(hits) if hits else 1
         all_it = load_db()
-        today = datetime.date.today().strftime("%Y-%m-%d")
-        def_dl = (datetime.date.today() + datetime.timedelta(days=7)).strftime("%Y-%m-%d")
+        today_date = datetime.date.today()
+        today = today_date.strftime("%Y-%m-%d")
+        def_dl = (today_date + datetime.timedelta(days=7)).strftime("%Y-%m-%d")
         
-        for idx, h in enumerate(hits):
-            p = int(((idx + 1) / total) * 100)
-            p_text.markdown(f"**巡回中... {p}%**")
-            p_bar.progress((idx + 1) / total)
-            d = analyze_ai(h["name"], h["url"], h["genre"], h["summary"])
-            if d and isinstance(d, dict):
-                p_name = d.get("standard_name") or h["name"][:25]
-                ret = parse_num(d.get("retail_price"), 5000)
-                mkt = parse_num(d.get("market_price"), 15000)
-                prof = mkt - int(mkt * 0.1) - 750 - ret
-                margin = round((prof / mkt) * 100, 1) if mkt > 0 else 0
-                main_dl = d.get("deadline") or def_dl
-                final_genre = d.get("genre") or h["genre"]
+        cached_info = {}
+        for x in all_it:
+            u = x.get("url")
+            if not u: continue
+            up_str = x.get("updated_at") or x.get("created_at") or "2000-01-01"
+            try: up_d = datetime.datetime.strptime(up_str, "%Y-%m-%d").date()
+            except: up_d = today_date - datetime.timedelta(days=10)
+            cached_info[u] = {"updated_at": up_d, "name": x.get("name", "")}
+        
+        new_hits = []
+        for h in hits:
+            u = h["url"]
+            if u in cached_info:
+                diff_days = (today_date - cached_info[u]["updated_at"]).days
+                if diff_days < 3 and (h["name"] in cached_info[u]["name"] or cached_info[u]["name"] in h["name"]):
+                    continue
+            new_hits.append(h)
+            
+        total = len(new_hits) if new_hits else 1
+        tasks = [(h, gemini_key) for h in new_hits]
+        done_cnt = 0
+        
+        with ThreadPoolExecutor(max_workers=4) as executor:
+            futures = [executor.submit(analyze_ai_task, t) for t in tasks]
+            for future in as_completed(futures):
+                done_cnt += 1
+                prog = int((done_cnt / total) * 100)
+                p_text.markdown(f"**高速巡回中... {prog}%**")
+                p_bar.progress(done_cnt / total)
                 
-                raw_s = d.get("sites") if isinstance(d.get("sites"), list) else []
-                sites = [{"site_name": s.get("site_name","公式/情報元"), "url": s.get("url") or h["url"], "created_at": today, "updated_at": today, "deadline_date": s.get("deadline", main_dl), "status": "未応募"} for s in raw_s]
-                for l in get_links(p_name, final_genre, main_dl):
-                    if not any(x["site_name"] == l["site_name"] for x in sites):
-                        sites.append({"site_name": l["site_name"], "url": l["url"], "created_at": today, "updated_at": today, "deadline_date": l["deadline_date"], "status": "未応募"})
-                
-                matched = next((x for x in all_it if p_name in x.get("name","") or x.get("name","") in p_name), None)
-                if matched:
-                    cs = matched.get("sites") or []
-                    if isinstance(cs, str): 
-                        try: cs = json.loads(cs)
-                        except: cs = []
-                    names = [x.get("site_name") for x in cs]
-                    for s in sites:
-                        if s["site_name"] not in names: cs.append(s)
-                    update_db(matched["id"], {"sites": cs, "updated_at": today})
-                else:
-                    rec = {"id": str(int(time.time())+idx), "name": p_name, "url": h["url"], "retail_price": ret, "market_price": mkt, "profit": prof, "margin_rate": margin, "break_even": int((ret+750)/0.9), "sns_genre": final_genre, "created_at": today, "updated_at": today, "sites": sites}
-                    save_db(rec)
-                    all_it.append(rec)
-            time.sleep(0.05)
+                h, d = future.result()
+                if d and isinstance(d, dict):
+                    p_name = d.get("standard_name") or h["name"][:25]
+                    ret = parse_num(d.get("retail_price"), 5000)
+                    mkt = parse_num(d.get("market_price"), 15000)
+                    prof = mkt - int(mkt * 0.1) - 750 - ret
+                    margin = round((prof / mkt) * 100, 1) if mkt > 0 else 0
+                    main_dl = d.get("deadline") or def_dl
+                    final_genre = d.get("genre") or h["genre"]
+                    
+                    raw_s = d.get("sites") if isinstance(d.get("sites"), list) else []
+                    sites = [{"site_name": s.get("site_name","公式/情報元"), "url": s.get("url") or h["url"], "created_at": today, "updated_at": today, "deadline_date": s.get("deadline", main_dl), "status": "未応募"} for s in raw_s]
+                    for l in get_links(p_name, final_genre, main_dl):
+                        if not any(x["site_name"] == l["site_name"] for x in sites):
+                            sites.append({"site_name": l["site_name"], "url": l["url"], "created_at": today, "updated_at": today, "deadline_date": l["deadline_date"], "status": "未応募"})
+                    
+                    matched = next((x for x in all_it if p_name in x.get("name","") or x.get("name","") in p_name or x.get("url") == h["url"]), None)
+                    if matched:
+                        cs = matched.get("sites") or []
+                        if isinstance(cs, str): 
+                            try: cs = json.loads(cs)
+                            except: cs = []
+                        names = [x.get("site_name") for x in cs]
+                        for s in sites:
+                            if s["site_name"] not in names: cs.append(s)
+                        update_db(matched["id"], {"retail_price": ret, "market_price": mkt, "profit": prof, "margin_rate": margin, "break_even": int((ret+750)/0.9), "sites": cs, "updated_at": today})
+                    else:
+                        rec = {"id": str(int(time.time()*1000) + done_cnt), "name": p_name, "url": h["url"], "retail_price": ret, "market_price": mkt, "profit": prof, "margin_rate": margin, "break_even": int((ret+750)/0.9), "sns_genre": final_genre, "created_at": today, "updated_at": today, "sites": sites}
+                        save_db(rec)
+                        all_it.append(rec)
+                        
         p_bar.empty(); p_text.empty()
-        st.success("巡回完了！")
+        st.success("高速巡回が完了しました！")
         st.rerun()
 
 with c2:
@@ -223,7 +235,7 @@ with c2:
             dl = (datetime.date.today() + datetime.timedelta(days=7)).strftime("%Y-%m-%d")
             sites = [{"site_name": "指定URL", "url": in_u or "https://google.com", "created_at": today, "updated_at": today, "deadline_date": dl, "status": "未応募"}]
             for l in get_links(in_n or "手動商品", in_g, dl): sites.append({"site_name": l["site_name"], "url": l["url"], "created_at": today, "updated_at": today, "deadline_date": dl, "status": "未応募"})
-            rec = {"id": str(int(time.time())), "name": in_n or "手動商品", "url": in_u or "https://google.com", "retail_price": 5000, "market_price": 15000, "profit": 7750, "margin_rate": 51.7, "break_even": 6388, "sns_genre": in_g, "created_at": today, "updated_at": today, "sites": sites}
+            rec = {"id": str(int(time.time()*1000)), "name": in_n or "手動商品", "url": in_u or "https://google.com", "retail_price": 5000, "market_price": 15000, "profit": 7750, "margin_rate": 51.7, "break_even": 6388, "sns_genre": in_g, "created_at": today, "updated_at": today, "sites": sites}
             save_db(rec)
             st.success("登録完了！")
             st.rerun()
@@ -250,26 +262,13 @@ for it in items:
 
 col_filt, col_sort = st.columns([1, 1])
 with col_filt:
-    genre_options = [
-        "すべて",
-        "🃏 TCG",
-        "🤖 プレバン",
-        "👟 スニーカー",
-        "🧸 ホビー/ソフビ",
-        "🎣 釣具",
-        "🌎 海外相場",
-        "📷 カメラ",
-        "⛺ キャンプ"
-    ]
+    genre_options = ["すべて", "🃏 TCG", "🤖 プレバン", "👟 スニーカー", "🧸 ホビー/ソフビ", "🎣 釣具", "🌎 海外相場", "📷 カメラ", "⛺ キャンプ"]
     sel_genre_raw = st.selectbox("ジャンル絞り込み", genre_options)
     app_count = sum(1 for x in norm_items if any(s.get("status") == "応募中" for s in x.get("sites", [])))
     f_app = st.checkbox(f"【応募中】がある商品のみ（現在: {app_count} 件）")
 
 with col_sort:
-    sort_mode = st.selectbox(
-        "並び替え",
-        ["更新順", "新着順", "利益額が高い順", "利益率が高い順", "予想相場が高い順", "締切が近い順"]
-    )
+    sort_mode = st.selectbox("並び替え", ["更新順", "新着順", "利益額が高い順", "利益率が高い順", "予想相場が高い順", "締切が近い順"])
 
 filtered_items = []
 target_genre_key = sel_genre_raw.split()[-1] if sel_genre_raw != "すべて" else None
@@ -281,31 +280,23 @@ for it in norm_items:
             if not any(k in it_genre for k in ["ホビー", "ソフビ"]): continue
         else:
             if target_genre_key not in it_genre: continue
-    
-    if f_app:
-        if not any(s.get("status") == "応募中" for s in it.get("sites", [])): continue
+    if f_app and not any(s.get("status") == "応募中" for s in it.get("sites", [])): continue
     filtered_items.append(it)
 
-if sort_mode == "利益額が高い順":
-    filtered_items.sort(key=lambda x: x.get("profit", 0), reverse=True)
-elif sort_mode == "利益率が高い順":
-    filtered_items.sort(key=lambda x: x.get("margin_rate", 0), reverse=True)
-elif sort_mode == "予想相場が高い順":
-    filtered_items.sort(key=lambda x: x.get("market_price", 0), reverse=True)
+if sort_mode == "利益額が高い順": filtered_items.sort(key=lambda x: x.get("profit", 0), reverse=True)
+elif sort_mode == "利益率が高い順": filtered_items.sort(key=lambda x: x.get("margin_rate", 0), reverse=True)
+elif sort_mode == "予想相場が高い順": filtered_items.sort(key=lambda x: x.get("market_price", 0), reverse=True)
 elif sort_mode == "締切が近い順":
     def get_min_deadline(it):
         dls = [s.get("deadline_date") for s in it.get("sites", []) if s.get("deadline_date")]
         return min(dls) if dls else "9999-99-99"
     filtered_items.sort(key=get_min_deadline)
-elif sort_mode == "新着順":
-    filtered_items.sort(key=lambda x: str(x.get("id", "")), reverse=True)
-else:
-    filtered_items.sort(key=lambda x: str(x.get("updated_at", "")), reverse=True)
+elif sort_mode == "新着順": filtered_items.sort(key=lambda x: str(x.get("id", "")), reverse=True)
+else: filtered_items.sort(key=lambda x: str(x.get("updated_at", "")), reverse=True)
 
 for item in filtered_items:
     sites = item.get("sites", [])
     has_app = any(s.get("status") == "応募中" for s in sites)
-    
     badge = "【応募中あり】" if has_app else ""
     prof_val = item.get('profit', 0)
     
@@ -317,9 +308,26 @@ for item in filtered_items:
     g_icon = get_genre_icon(item.get('sns_genre', ''))
     
     with st.expander(f"{g_icon} {item.get('name','')} {p_disp} {badge}"):
-        ci, cd = st.columns([5, 1])
-        ci.caption(f"ジャンル: {item.get('sns_genre','')} | 掲載日: {item.get('created_at','-')} | 更新日: {item.get('updated_at','-')}")
-        if cd.button("削除", key=f"d_{item['id']}"):
+        ci, cr, cd = st.columns([4, 1.2, 0.8])
+        ci.caption(f"ジャンル: {item.get('sns_genre','')} | 更新: {item.get('updated_at','-')}")
+        
+        # 個別商品の最新相場・情報再取得ボタン
+        if cr.button("🔄 再取得", key=f"r_{item['id']}", use_container_width=True):
+            with st.spinner("最新相場を取得中..."):
+                d = call_gemini(item.get("name",""), item.get("url",""), item.get("sns_genre",""), "")
+                if d and isinstance(d, dict):
+                    ret = parse_num(d.get("retail_price"), item.get("retail_price", 5000))
+                    mkt = parse_num(d.get("market_price"), item.get("market_price", 15000))
+                    prof = mkt - int(mkt * 0.1) - 750 - ret
+                    margin = round((prof / mkt) * 100, 1) if mkt > 0 else 0
+                    update_db(item["id"], {"retail_price": ret, "market_price": mkt, "profit": prof, "margin_rate": margin, "break_even": int((ret+750)/0.9), "updated_at": today})
+                    st.success("相場を更新しました！")
+                    time.sleep(0.5)
+                    st.rerun()
+                else:
+                    st.warning("相場情報の再取得に失敗しました")
+                    
+        if cd.button("削除", key=f"d_{item['id']}", use_container_width=True):
             del_db(item["id"])
             st.rerun()
             
@@ -342,7 +350,7 @@ for item in filtered_items:
                 st.write(f"🔗 **{s.get('site_name')}**")
                 st.caption(f"初回: {s.get('created_at','-')} | 更新: {s.get('updated_at','-')} | 締切: {s.get('deadline_date','未設定')}")
                 
-                cs, cd = st.columns(2)
+                cs, cd_date = st.columns(2)
                 st_list = ["未応募", "応募中", "当選", "落選"]
                 cur_st = s.get("status", "未応募")
                 nst = cs.selectbox("応募状況", st_list, index=st_list.index(cur_st) if cur_st in st_list else 0, key=f"s_{item['id']}_{idx}")
@@ -353,7 +361,7 @@ for item in filtered_items:
                 
                 try: d_obj = datetime.datetime.strptime(s.get("deadline_date", def_dl), "%Y-%m-%d").date()
                 except: d_obj = datetime.date.today()
-                nd = cd.date_input("締切日", value=d_obj, key=f"dt_{item['id']}_{idx}")
+                nd = cd_date.date_input("締切日", value=d_obj, key=f"dt_{item['id']}_{idx}")
                 nd_str = nd.strftime("%Y-%m-%d")
                 if nd_str != s.get("deadline_date"):
                     s["deadline_date"] = nd_str
