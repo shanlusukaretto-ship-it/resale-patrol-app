@@ -16,15 +16,15 @@ if sb_url and sb_key:
 if "items" not in st.session_state: st.session_state.items = []
 
 GENRE_ICONS = {
-    "釣具": "🎣",
-    "キャンプ": "⛺",
-    "カメラ": "📷",
     "TCG": "🃏",
     "プレバン": "🤖",
-    "ソフビ": "🧸",
-    "ホビー": "🧸",
     "スニーカー": "👟",
+    "ホビー": "🧸",
+    "ソフビ": "🧸",
+    "釣具": "🎣",
     "海外相場": "🌎",
+    "カメラ": "📷",
+    "キャンプ": "⛺",
     "その他": "📦"
 }
 
@@ -70,46 +70,49 @@ def get_links(name, genre, dl):
             {"site_name": "あみあみ（予約抽選）", "url": f"https://www.amiami.jp/top/page/c/search.html?s_keywords={enc}", "deadline_date": dl},
             {"site_name": "ヨドバシ・ドット・コム", "url": f"https://www.yodobashi.com/?word={enc}", "deadline_date": dl}
         ]
+    elif any(k in g for k in ["プレバン", "バンダイ"]):
+        return [
+            {"site_name": "プレミアムバンダイ公式", "url": f"https://p-bandai.jp/chara/c0001/?utm_source=search&keyword={enc}", "deadline_date": dl},
+            {"site_name": "あみあみ公式", "url": f"https://www.amiami.jp/top/page/c/search.html?s_keywords={enc}", "deadline_date": dl}
+        ]
+    elif any(k in g for k in ["スニーカー", "NIKE", "SNKRS"]):
+        return [
+            {"site_name": "SNKRS / Nike公式", "url": f"https://www.nike.com/jp/w?q={enc}", "deadline_date": dl},
+            {"site_name": "スニダン（検索）", "url": f"https://snkrdunk.com/search?keywords={enc}", "deadline_date": dl}
+        ]
+    elif any(k in g for k in ["ジャンプ", "サンデー", "講談社", "ソフビ", "ホビー", "TS-NEO"]):
+        return [
+            {"site_name": "ジャンプキャラクターズストア", "url": "https://jumpcs.shueisha.co.jp/", "deadline_date": dl},
+            {"site_name": "少年サンデープレミアムSHOP", "url": "https://www.pal-shop.jp/sunday/", "deadline_date": dl},
+            {"site_name": "TS-NEO公式", "url": "https://ts-neo.com/", "deadline_date": dl}
+        ]
     elif any(k in g for k in ["釣具", "ルアー", "DRT", "リール", "タイニークラッシュ"]):
         return [
             {"site_name": "バックラッシュ公式", "url": f"https://www.backlash.co.jp/item_list/?kw={enc}", "deadline_date": dl},
             {"site_name": "キャスティング オンライン", "url": f"https://store.castingnet.jp/shop/goods/search.aspx?keyword={enc}", "deadline_date": dl},
             {"site_name": "釣具 アメブロ入荷検索", "url": f"https://search.ameba.jp/search/entry/{enc}.html", "deadline_date": dl}
         ]
-    elif any(k in g for k in ["キャンプ", "アウトドア", "ガレージブランド"]):
+    elif "海外相場" in g or "鑑定" in g:
         return [
-            {"site_name": "GO OUT Online", "url": f"https://www.goout.jp/category/B001/?keyword={enc}", "deadline_date": dl},
-            {"site_name": "ヤフオク（相場確認）", "url": f"https://auctions.yahoo.co.jp/search/search?p={enc}", "deadline_date": dl}
+            {"site_name": "ヤフオク（国内仕入れ検索）", "url": f"https://auctions.yahoo.co.jp/search/search?p={enc}", "deadline_date": dl},
+            {"site_name": "駿河屋（在庫・買取検索）", "url": f"https://www.suruga-ya.jp/search?search_word={enc}", "deadline_date": dl}
         ]
     elif any(k in g for k in ["カメラ", "レンズ", "ライカ", "FUJIFILM"]):
         return [
             {"site_name": "マップカメラ公式", "url": f"https://www.mapcamera.com/search?keyword={enc}", "deadline_date": dl},
             {"site_name": "フジヤカメラ", "url": f"https://www.fujiya-camera.co.jp/shop/goods/search.aspx?keyword={enc}", "deadline_date": dl}
         ]
-    elif any(k in g for k in ["プレバン", "バンダイ"]):
+    elif any(k in g for k in ["キャンプ", "アウトドア", "ガレージブランド"]):
         return [
-            {"site_name": "プレミアムバンダイ公式", "url": f"https://p-bandai.jp/chara/c0001/?utm_source=search&keyword={enc}", "deadline_date": dl},
-            {"site_name": "あみあみ公式", "url": f"https://www.amiami.jp/top/page/c/search.html?s_keywords={enc}", "deadline_date": dl}
-        ]
-    elif any(k in g for k in ["ジャンプ", "サンデー", "講談社", "ソフビ", "TS-NEO"]):
-        return [
-            {"site_name": "ジャンプキャラクターズストア", "url": "https://jumpcs.shueisha.co.jp/", "deadline_date": dl},
-            {"site_name": "少年サンデープレミアムSHOP", "url": "https://www.pal-shop.jp/sunday/", "deadline_date": dl},
-            {"site_name": "TS-NEO公式", "url": "https://ts-neo.com/", "deadline_date": dl}
-        ]
-    elif "海外相場" in g or "鑑定" in g:
-        return [
-            {"site_name": "ヤフオク（国内仕入れ検索）", "url": f"https://auctions.yahoo.co.jp/search/search?p={enc}", "deadline_date": dl},
-            {"site_name": "駿河屋（在庫・買取検索）", "url": f"https://www.suruga-ya.jp/search?search_word={enc}", "deadline_date": dl}
+            {"site_name": "GO OUT Online", "url": f"https://www.goout.jp/category/B001/?keyword={enc}", "deadline_date": dl},
+            {"site_name": "ヤフオク（相場確認）", "url": f"https://auctions.yahoo.co.jp/search/search?p={enc}", "deadline_date": dl}
         ]
     return [
-        {"site_name": "SNKRS / Nike公式", "url": f"https://www.nike.com/jp/w?q={enc}", "deadline_date": dl},
         {"site_name": "公式情報元", "url": "https://google.com", "deadline_date": dl}
     ]
 
 def analyze_ai(name, url, genre, raw):
     if not gemini_key: return None
-    # 自動車・バイク・車両関連の除外判定
     bad_words = ["車", "自動車", "バイク", "タイヤ", "ホイール", "オートバイ", "カーナビ", "走行"]
     if any(bw in name or bw in raw for bw in bad_words):
         return None
@@ -117,32 +120,34 @@ def analyze_ai(name, url, genre, raw):
         c = genai.Client(api_key=gemini_key)
         today = datetime.date.today().strftime("%Y-%m-%d")
         dl = (datetime.date.today() + datetime.timedelta(days=7)).strftime("%Y-%m-%d")
-        p = f"本日は{today}。限定品・極小生産品（釣具・キャンプ・カメラ・TCG・ホビー・海外高騰等）のアナリストとして定価(仕入目安),予想相場(二次流通),受付元をJSON出力。自動車やバイク関連は絶対に除外。価格数値のみ。対象:{name},{url},{genre},{raw[:350]}。形式:{{\"standard_name\":\"商品名\",\"retail_price\":5000,\"market_price\":15000,\"deadline\":\"{dl}\",\"genre\":\"{genre}\",\"sites\":[{{\"site_name\":\"受付/情報元\",\"url\":\"{url}\",\"deadline\":\"{dl}\"}}]}}"
+        p = f"本日は{today}。限定品・極小生産品（TCG・プレバン・ホビー・釣具・海外高騰等）のアナリストとして定価(仕入目安),予想相場(二次流通),受付元をJSON出力。自動車やバイク関連は絶対に除外。価格数値のみ。対象:{name},{url},{genre},{raw[:350]}。形式:{{\"standard_name\":\"商品名\",\"retail_price\":5000,\"market_price\":15000,\"deadline\":\"{dl}\",\"genre\":\"{genre}\",\"sites\":[{{\"site_name\":\"受付/情報元\",\"url\":\"{url}\",\"deadline\":\"{dl}\"}}]}}"
         res = c.models.generate_content(model="gemini-3.6-flash", contents=p)
         txt = res.text.strip().replace("```json","").replace("```","").strip()
-        return json.loads(txt)
+        data = json.loads(txt)
+        return data if isinstance(data, dict) else None
     except: return None
 
 def fetch_rss():
     hits = []
-    # 釣具（アメブロ・入荷検索含め強化）および車完全除外の巡回クエリ
+    # 需要が多い順に巡回
     qs = [
+        ("ポケカ 抽選予約 予約開始", "TCG"),
+        ("ワンピースカード 抽選予約 予約開始", "TCG"),
+        ("プレミアムバンダイ 受注開始 限定", "プレバン"),
+        ("Nike SNKRS 抽選", "スニーカー"),
+        ("ジャンプキャラクターズストア 受注", "ホビー"),
+        ("サンデープレミアムショップ 受注", "ホビー"),
+        ("TS-NEO ソフビ 抽選 限定", "ソフビ"),
+        ("当時物 ソフビ 落札", "ソフビ"),
         ("site:ameblo.jp タイニークラッシュ 抽選 入荷", "釣具"),
         ("site:ameblo.jp DRT 抽選 販売", "釣具"),
         ("DRT タイニークラッシュ 抽選 予約", "釣具"),
         ("カーペンター ルアー 抽選 販売", "釣具"),
-        ("ガレージブランド キャンプ 抽選 限定", "キャンプ"),
-        ("富士フイルム 限定 カメラ 抽選", "カメラ"),
-        ("ライカ 特別限定 モデル 発売", "カメラ"),
         ("漫画 初版 BGS 落札", "海外相場"),
         ("海外相場 高騰 オークション", "海外相場"),
-        ("当時物 ソフビ 落札", "ソフビ"),
-        ("TS-NEO ソフビ 抽選 限定", "ソフビ"),
-        ("サンデープレミアムショップ 受注", "ホビー"),
-        ("ジャンプキャラクターズストア 受注", "ホビー"),
-        ("ポケカ 抽選予約 予約開始", "TCG"),
-        ("プレミアムバンダイ 受注開始 限定", "プレバン"),
-        ("Nike SNKRS 抽選", "スニーカー")
+        ("富士フイルム 限定 カメラ 抽選", "カメラ"),
+        ("ライカ 特別限定 モデル 発売", "カメラ"),
+        ("ガレージブランド キャンプ 抽選 限定", "キャンプ")
     ]
     for q, g in qs:
         f = feedparser.parse(f"https://news.google.com/rss/search?q={urllib.parse.quote(q)}&hl=ja&gl=JP&ceid=JP:ja")
@@ -167,7 +172,7 @@ with c1:
             p_text.markdown(f"**巡回中... {p}%**")
             p_bar.progress((idx + 1) / total)
             d = analyze_ai(h["name"], h["url"], h["genre"], h["summary"])
-            if d:
+            if d and isinstance(d, dict):
                 p_name = d.get("standard_name") or h["name"][:25]
                 ret = parse_num(d.get("retail_price"), 5000)
                 mkt = parse_num(d.get("market_price"), 15000)
@@ -205,7 +210,8 @@ with c2:
     with st.popover("➕ 手動追加"):
         in_n = st.text_input("商品名")
         in_u = st.text_input("URL")
-        in_g = st.selectbox("ジャンル", ["TCG", "釣具", "キャンプ", "カメラ", "海外相場", "プレバン", "ホビー", "ソフビ", "スニーカー", "その他"])
+        # 需要順に並び替え
+        in_g = st.selectbox("ジャンル", ["TCG", "プレバン", "スニーカー", "ホビー", "ソフビ", "釣具", "海外相場", "カメラ", "キャンプ", "その他"])
         if st.button("登録", use_container_width=True):
             today = datetime.date.today().strftime("%Y-%m-%d")
             dl = (datetime.date.today() + datetime.timedelta(days=7)).strftime("%Y-%m-%d")
@@ -239,7 +245,18 @@ for it in items:
 # コントロールバー（ジャンル選択・並び替え）
 col_filt, col_sort = st.columns([1, 1])
 with col_filt:
-    genre_options = ["すべて", "🎣 釣具", "⛺ キャンプ", "📷 カメラ", "🃏 TCG", "🤖 プレバン", "🧸 ホビー/ソフビ", "👟 スニーカー", "🌎 海外相場"]
+    # 需要順に並び替え
+    genre_options = [
+        "すべて",
+        "🃏 TCG",
+        "🤖 プレバン",
+        "👟 スニーカー",
+        "🧸 ホビー/ソフビ",
+        "🎣 釣具",
+        "🌎 海外相場",
+        "📷 カメラ",
+        "⛺ キャンプ"
+    ]
     sel_genre_raw = st.selectbox("ジャンル絞り込み", genre_options)
     app_count = sum(1 for x in norm_items if any(s.get("status") == "応募中" for s in x.get("sites", [])))
     f_app = st.checkbox(f"【応募中】がある商品のみ（現在: {app_count} 件）")
