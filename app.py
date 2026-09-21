@@ -10,8 +10,7 @@ gk = st.secrets.get("GEMINI_API_KEY", "")
 su, sk = st.secrets.get("SUPABASE_URL", ""), st.secrets.get("SUPABASE_KEY", "")
 sb = create_client(su, sk) if su and sk else None
 
-# items の初期化を厳格にリスト型として保証
-if "items" not in st.session_state or not isinstance(st.session_state.items, list):
+if "items" not in st.session_state:
     st.session_state.items = []
 
 ICONS = {"TCG":"🃏","プレバン":"🤖","スニーカー":"👟","ホビー":"🧸","ソフビ":"🧸","釣具":"🎣","海外相場":"🌎","カメラ":"📷","キャンプ":"⛺"}
@@ -36,15 +35,17 @@ def load_db():
             res = sb.table("items").select("*").order("id", desc=True).execute().data
             if isinstance(res, list): return res
         except: pass
-    return st.session_state.items if isinstance(st.session_state.items, list) else []
+    return st.session_state.get("items", [])
 
 def save_db(it):
     if sb:
-        try: sb.table("items").insert(it).execute()
+        try:
+            sb.table("items").insert(it).execute()
+            return
         except: pass
-    if not isinstance(st.session_state.items, list):
+    if "items" not in st.session_state or not isinstance(st.session_state.items, list):
         st.session_state.items = []
-    st.session_state.items.insert(0, it)
+    st.session_state.items = [it] + st.session_state.items
 
 def update_db(i_id, data):
     if sb:
@@ -55,7 +56,7 @@ def del_db(i_id):
     if sb:
         try: sb.table("items").delete().eq("id", i_id).execute()
         except: pass
-    if isinstance(st.session_state.items, list):
+    if "items" in st.session_state and isinstance(st.session_state.items, list):
         st.session_state.items = [x for x in st.session_state.items if str(x.get("id")) != str(i_id)]
 
 def fetch_web_text(url):
@@ -155,12 +156,29 @@ with c1:
 
 with c2:
     with st.popover("➕ 手動登録"):
-        in_n, in_u = st.text_input("商品名"), st.text_input("URL (Xや公式リンク)")
+        in_n = st.text_input("商品名")
+        in_u = st.text_input("URL (Xや公式リンク)")
         in_g = st.selectbox("ジャンル", ["TCG", "プレバン", "スニーカー", "ホビー", "ソフビ", "釣具", "海外相場", "カメラ", "キャンプ", "その他"])
         if st.button("登録", use_container_width=True):
             sites = [{"site_name": "指定URL", "url": in_u or "https://google.com", "created_at": today, "updated_at": today, "deadline_date": None, "status": "未応募"}]
             for l in get_links(in_n or "手動登録アイテム", in_g): sites.append({**l, "created_at": today, "updated_at": today, "status": "未応募"})
-            save_db({"id": str(int(time.time()*1000)), "name": in_n or "手動登録アイテム", "url": in_u or "https://google.com", "retail_price": 5000, "market_price": 15000, "profit": 7750, "margin_rate": 51.7, "break_even": 6388, "sns_genre": in_g, "trust_score": 95, "trust_reason": "X/手動登録", "created_at": today, "updated_at": today, "sites": sites})
+            new_item = {
+                "id": str(int(time.time()*1000)),
+                "name": in_n or "手動登録アイテム",
+                "url": in_u or "https://google.com",
+                "retail_price": 5000,
+                "market_price": 15000,
+                "profit": 7750,
+                "margin_rate": 51.7,
+                "break_even": 6388,
+                "sns_genre": in_g,
+                "trust_score": 95,
+                "trust_reason": "X/手動登録",
+                "created_at": today,
+                "updated_at": today,
+                "sites": sites
+            }
+            save_db(new_item)
             st.rerun()
 
 st.markdown("---")
