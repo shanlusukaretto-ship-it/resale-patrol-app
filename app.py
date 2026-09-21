@@ -50,17 +50,42 @@ def get_links(name, genre, dl):
         return [
             {"site_name": "ポケモンセンターオンライン", "url": f"https://www.pokemoncenter-online.com/?main_page=product_list&keyword={enc}", "deadline_date": dl},
             {"site_name": "あみあみ（予約抽選）", "url": f"https://www.amiami.jp/top/page/c/search.html?s_keywords={enc}", "deadline_date": dl},
-            {"site_name": "ヨドバシ・ドット・コム", "url": f"https://www.yodobashi.com/?word={enc}", "deadline_date": dl},
-            {"site_name": "スニダン（相場）", "url": f"https://snkrdunk.com/search?keywords={enc}", "deadline_date": dl}
+            {"site_name": "ヨドバシ・ドット・コム", "url": f"https://www.yodobashi.com/?word={enc}", "deadline_date": dl}
+        ]
+    elif any(k in g for k in ["釣具", "ルアー", "DRT", "リール"]):
+        return [
+            {"site_name": "バックラッシュ（DRT・抽選）", "url": f"https://www.backlash.co.jp/item_list/?kw={enc}", "deadline_date": dl},
+            {"site_name": "キャスティング オンライン", "url": f"https://store.castingnet.jp/shop/goods/search.aspx?keyword={enc}", "deadline_date": dl}
+        ]
+    elif any(k in g for k in ["キャンプ", "アウトドア", "ガレージブランド"]):
+        return [
+            {"site_name": "GO OUT Online", "url": f"https://www.goout.jp/category/B001/?keyword={enc}", "deadline_date": dl},
+            {"site_name": "ヤフオク（相場確認）", "url": f"https://auctions.yahoo.co.jp/search/search?p={enc}", "deadline_date": dl}
+        ]
+    elif any(k in g for k in ["カメラ", "レンズ", "ライカ", "FUJIFILM"]):
+        return [
+            {"site_name": "マップカメラ公式", "url": f"https://www.mapcamera.com/search?keyword={enc}", "deadline_date": dl},
+            {"site_name": "フジヤカメラ", "url": f"https://www.fujiya-camera.co.jp/shop/goods/search.aspx?keyword={enc}", "deadline_date": dl}
         ]
     elif any(k in g for k in ["プレバン", "バンダイ"]):
         return [
             {"site_name": "プレミアムバンダイ公式", "url": f"https://p-bandai.jp/chara/c0001/?utm_source=search&keyword={enc}", "deadline_date": dl},
             {"site_name": "あみあみ公式", "url": f"https://www.amiami.jp/top/page/c/search.html?s_keywords={enc}", "deadline_date": dl}
         ]
+    elif any(k in g for k in ["ジャンプ", "サンデー", "講談社", "ソフビ", "TS-NEO"]):
+        return [
+            {"site_name": "ジャンプキャラクターズストア", "url": "https://jumpcs.shueisha.co.jp/", "deadline_date": dl},
+            {"site_name": "少年サンデープレミアムSHOP", "url": "https://www.pal-shop.jp/sunday/", "deadline_date": dl},
+            {"site_name": "TS-NEO公式", "url": "https://ts-neo.com/", "deadline_date": dl}
+        ]
+    elif "海外相場" in g or "鑑定" in g:
+        return [
+            {"site_name": "ヤフオク（国内仕入れ検索）", "url": f"https://auctions.yahoo.co.jp/search/search?p={enc}", "deadline_date": dl},
+            {"site_name": "駿河屋（在庫・買取検索）", "url": f"https://www.suruga-ya.jp/search?search_word={enc}", "deadline_date": dl}
+        ]
     return [
         {"site_name": "SNKRS / Nike公式", "url": f"https://www.nike.com/jp/w?q={enc}", "deadline_date": dl},
-        {"site_name": "スニダン（検索）", "url": f"https://snkrdunk.com/search?keywords={enc}", "deadline_date": dl}
+        {"site_name": "公式情報元", "url": "https://google.com", "deadline_date": dl}
     ]
 
 def analyze_ai(name, url, genre, raw):
@@ -69,7 +94,7 @@ def analyze_ai(name, url, genre, raw):
         c = genai.Client(api_key=gemini_key)
         today = datetime.date.today().strftime("%Y-%m-%d")
         dl = (datetime.date.today() + datetime.timedelta(days=7)).strftime("%Y-%m-%d")
-        p = f"本日は{today}。限定品の定価,相場,受付先をJSON出力。価格は数値のみ。対象:{name},{url},{genre},{raw[:300]}。フォーマット:{{\"standard_name\":\"商品名\",\"retail_price\":5000,\"market_price\":12000,\"deadline\":\"{dl}\",\"sites\":[{{\"site_name\":\"受付元\",\"url\":\"{url}\",\"deadline\":\"{dl}\"}}]}}"
+        p = f"本日は{today}。限定品・極小生産品（釣具・キャンプ・カメラ・TCG・海外高騰等）のアナリストとして定価(仕入目安),予想相場(二次流通),受付元をJSON出力。価格数値のみ。対象:{name},{url},{genre},{raw[:350]}。形式:{{\"standard_name\":\"商品名\",\"retail_price\":5000,\"market_price\":15000,\"deadline\":\"{dl}\",\"genre\":\"{genre}\",\"sites\":[{{\"site_name\":\"受付/情報元\",\"url\":\"{url}\",\"deadline\":\"{dl}\"}}]}}"
         res = c.models.generate_content(model="gemini-3.6-flash", contents=p)
         txt = res.text.strip().replace("```json","").replace("```","").strip()
         return json.loads(txt)
@@ -77,7 +102,22 @@ def analyze_ai(name, url, genre, raw):
 
 def fetch_rss():
     hits = []
-    qs = [("ポケカ 抽選予約 予約開始", "TCG"), ("プレミアムバンダイ 受注開始 限定", "プレバン"), ("Nike SNKRS 抽選", "スニーカー")]
+    qs = [
+        ("DRT タイニークラッシュ 抽選 予約", "釣具"),
+        ("カーペンター ルアー 抽選 販売", "釣具"),
+        ("ガレージブランド キャンプ 抽選 限定", "キャンプ"),
+        ("富士フイルム 限定 カメラ 抽選", "カメラ"),
+        ("ライカ 特別限定 モデル 発売", "カメラ"),
+        ("漫画 初版 BGS 落札", "海外相場"),
+        ("海外相場 高騰 オークション", "海外相場"),
+        ("当時物 ソフビ 落札", "ソフビ"),
+        ("TS-NEO ソフビ 抽選 限定", "ソフビ"),
+        ("サンデープレミアムショップ 受注", "ホビー"),
+        ("ジャンプキャラクターズストア 受注", "ホビー"),
+        ("ポケカ 抽選予約 予約開始", "TCG"),
+        ("プレミアムバンダイ 受注開始 限定", "プレバン"),
+        ("Nike SNKRS 抽選", "スニーカー")
+    ]
     for q, g in qs:
         f = feedparser.parse(f"https://news.google.com/rss/search?q={urllib.parse.quote(q)}&hl=ja&gl=JP&ceid=JP:ja")
         for e in f.entries[:2]:
@@ -104,14 +144,15 @@ with c1:
             if d:
                 p_name = d.get("standard_name") or h["name"][:25]
                 ret = parse_num(d.get("retail_price"), 5000)
-                mkt = parse_num(d.get("market_price"), 10000)
+                mkt = parse_num(d.get("market_price"), 15000)
                 prof = mkt - int(mkt * 0.1) - 750 - ret
                 margin = round((prof / mkt) * 100, 1) if mkt > 0 else 0
                 main_dl = d.get("deadline") or def_dl
+                final_genre = d.get("genre") or h["genre"]
                 
                 raw_s = d.get("sites") if isinstance(d.get("sites"), list) else []
-                sites = [{"site_name": s.get("site_name","公式"), "url": s.get("url") or h["url"], "created_at": today, "updated_at": today, "deadline_date": s.get("deadline", main_dl), "status": "未応募"} for s in raw_s]
-                for l in get_links(p_name, h["genre"], main_dl):
+                sites = [{"site_name": s.get("site_name","公式/情報元"), "url": s.get("url") or h["url"], "created_at": today, "updated_at": today, "deadline_date": s.get("deadline", main_dl), "status": "未応募"} for s in raw_s]
+                for l in get_links(p_name, final_genre, main_dl):
                     if not any(x["site_name"] == l["site_name"] for x in sites):
                         sites.append({"site_name": l["site_name"], "url": l["url"], "created_at": today, "updated_at": today, "deadline_date": l["deadline_date"], "status": "未応募"})
                 
@@ -126,7 +167,7 @@ with c1:
                         if s["site_name"] not in names: cs.append(s)
                     update_db(matched["id"], {"sites": cs, "updated_at": today})
                 else:
-                    rec = {"id": str(int(time.time())+idx), "name": p_name, "url": h["url"], "retail_price": ret, "market_price": mkt, "profit": prof, "margin_rate": margin, "break_even": int((ret+750)/0.9), "sns_genre": h["genre"], "created_at": today, "updated_at": today, "sites": sites}
+                    rec = {"id": str(int(time.time())+idx), "name": p_name, "url": h["url"], "retail_price": ret, "market_price": mkt, "profit": prof, "margin_rate": margin, "break_even": int((ret+750)/0.9), "sns_genre": final_genre, "created_at": today, "updated_at": today, "sites": sites}
                     save_db(rec)
                     all_it.append(rec)
             time.sleep(0.05)
@@ -138,13 +179,13 @@ with c2:
     with st.popover("➕ 手動追加"):
         in_n = st.text_input("商品名")
         in_u = st.text_input("URL")
-        in_g = st.selectbox("ジャンル", ["TCG", "プレバン", "スニーカー", "その他"])
+        in_g = st.selectbox("ジャンル", ["TCG", "釣具", "キャンプ", "カメラ", "海外相場", "プレバン", "ホビー", "ソフビ", "スニーカー", "その他"])
         if st.button("登録", use_container_width=True):
             today = datetime.date.today().strftime("%Y-%m-%d")
             dl = (datetime.date.today() + datetime.timedelta(days=7)).strftime("%Y-%m-%d")
             sites = [{"site_name": "指定URL", "url": in_u or "https://google.com", "created_at": today, "updated_at": today, "deadline_date": dl, "status": "未応募"}]
             for l in get_links(in_n or "手動商品", in_g, dl): sites.append({"site_name": l["site_name"], "url": l["url"], "created_at": today, "updated_at": today, "deadline_date": dl, "status": "未応募"})
-            rec = {"id": str(int(time.time())), "name": in_n or "手動商品", "url": in_u or "https://google.com", "retail_price": 5000, "market_price": 10000, "profit": 3250, "margin_rate": 32.5, "break_even": 6388, "sns_genre": in_g, "created_at": today, "updated_at": today, "sites": sites}
+            rec = {"id": str(int(time.time())), "name": in_n or "手動商品", "url": in_u or "https://google.com", "retail_price": 5000, "market_price": 15000, "profit": 7750, "margin_rate": 51.7, "break_even": 6388, "sns_genre": in_g, "created_at": today, "updated_at": today, "sites": sites}
             save_db(rec)
             st.success("登録完了！")
             st.rerun()
@@ -169,8 +210,32 @@ for it in items:
     it["sites"] = s
     norm_items.append(it)
 
-app_count = sum(1 for x in norm_items if any(s.get("status") == "応募中" for s in x.get("sites", [])))
-f_app = st.checkbox(f"【応募中】がある商品のみ表示（現在: {app_count} 件）")
+col_filt, col_sort = st.columns([1, 1])
+with col_filt:
+    app_count = sum(1 for x in norm_items if any(s.get("status") == "応募中" for s in x.get("sites", [])))
+    f_app = st.checkbox(f"【応募中】がある商品のみ表示（現在: {app_count} 件）")
+
+with col_sort:
+    sort_mode = st.selectbox(
+        "並び替え",
+        ["更新順", "新着順", "利益額が高い順", "利益率が高い順", "予想相場が高い順", "締切が近い順"]
+    )
+
+if sort_mode == "利益額が高い順":
+    norm_items.sort(key=lambda x: x.get("profit", 0), reverse=True)
+elif sort_mode == "利益率が高い順":
+    norm_items.sort(key=lambda x: x.get("margin_rate", 0), reverse=True)
+elif sort_mode == "予想相場が高い順":
+    norm_items.sort(key=lambda x: x.get("market_price", 0), reverse=True)
+elif sort_mode == "締切が近い順":
+    def get_min_deadline(it):
+        dls = [s.get("deadline_date") for s in it.get("sites", []) if s.get("deadline_date")]
+        return min(dls) if dls else "9999-99-99"
+    norm_items.sort(key=get_min_deadline)
+elif sort_mode == "新着順":
+    norm_items.sort(key=lambda x: str(x.get("id", "")), reverse=True)
+else:
+    norm_items.sort(key=lambda x: str(x.get("updated_at", "")), reverse=True)
 
 for item in norm_items:
     sites = item.get("sites", [])
@@ -188,17 +253,18 @@ for item in norm_items:
             st.rerun()
             
         m1, m2, m3, m4 = st.columns(4)
-        m1.metric("定価", f"¥{item.get('retail_price',0):,}")
+        m1.metric("定価/仕入", f"¥{item.get('retail_price',0):,}")
         m2.metric("予想相場", f"¥{item.get('market_price',0):,}")
-        m3.metric("見込利益", f"¥{item.get('profit',0):,}")
+        m3.metric("見込利益", f"¥{item.get('profit',0):,}", f"{item.get('margin_rate',0)}%")
         m4.metric("損益分岐", f"¥{item.get('break_even',0):,}")
         
         kw = urllib.parse.quote(item.get("name",""))
-        k1, k2 = st.columns(2)
+        k1, k2, k3 = st.columns(3)
         k1.link_button("👟 スニダン相場", f"https://snkrdunk.com/search?keywords={kw}", use_container_width=True)
         k2.link_button("🔴 メルカリ相場", f"https://jp.mercari.com/search?keyword={kw}&status=sold_out", use_container_width=True)
+        k3.link_button("🇺🇸 eBay落札相場", f"https://www.ebay.com/sch/i.html?_nkw={kw}&LH_Complete=1&LH_Sold=1", use_container_width=True)
         
-        st.write(f"**受付サイト一覧（{len(sites)}件）**")
+        st.write(f"**受付・関連サイト一覧（{len(sites)}件）**")
         up_flag = False
         for idx, s in enumerate(sites):
             with st.container(border=True):
@@ -223,7 +289,7 @@ for item in norm_items:
                     s["updated_at"] = today
                     up_flag = True
                 
-                st.link_button("👉 受付ページへ飛ぶ", s.get("url", "https://google.com"), use_container_width=True)
+                st.link_button("👉 サイトへ飛ぶ", s.get("url", "https://google.com"), use_container_width=True)
                 
         if up_flag:
             update_db(item["id"], {"sites": sites, "updated_at": today})
