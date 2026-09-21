@@ -15,6 +15,24 @@ if sb_url and sb_key:
 
 if "items" not in st.session_state: st.session_state.items = []
 
+GENRE_ICONS = {
+    "釣具": "🎣",
+    "キャンプ": "⛺",
+    "カメラ": "📷",
+    "TCG": "🃏",
+    "プレバン": "🤖",
+    "ソフビ": "🧸",
+    "ホビー": "🧸",
+    "スニーカー": "👟",
+    "海外相場": "🌎",
+    "その他": "📦"
+}
+
+def get_genre_icon(genre_str):
+    for k, v in GENRE_ICONS.items():
+        if k in str(genre_str): return v
+    return "📦"
+
 def parse_num(val, default):
     if not val: return default
     cleaned = re.sub(r"[^\d]", "", str(val))
@@ -210,10 +228,13 @@ for it in items:
     it["sites"] = s
     norm_items.append(it)
 
+# コントロールバー（ジャンル選択・並び替え）
 col_filt, col_sort = st.columns([1, 1])
 with col_filt:
+    genre_options = ["すべて", "🎣 釣具", "⛺ キャンプ", "📷 カメラ", "🃏 TCG", "🤖 プレバン", "🧸 ホビー/ソフビ", "👟 スニーカー", "🌎 海外相場"]
+    sel_genre_raw = st.selectbox("ジャンル絞り込み", genre_options)
     app_count = sum(1 for x in norm_items if any(s.get("status") == "応募中" for s in x.get("sites", [])))
-    f_app = st.checkbox(f"【応募中】がある商品のみ表示（現在: {app_count} 件）")
+    f_app = st.checkbox(f"【応募中】がある商品のみ（現在: {app_count} 件）")
 
 with col_sort:
     sort_mode = st.selectbox(
@@ -221,31 +242,58 @@ with col_sort:
         ["更新順", "新着順", "利益額が高い順", "利益率が高い順", "予想相場が高い順", "締切が近い順"]
     )
 
+# 絞り込み処理
+filtered_items = []
+target_genre_key = sel_genre_raw.split()[-1] if sel_genre_raw != "すべて" else None
+
+for it in norm_items:
+    if target_genre_key:
+        it_genre = str(it.get("sns_genre", ""))
+        if target_genre_key == "ホビー/ソフビ":
+            if not any(k in it_genre for k in ["ホビー", "ソフビ"]): continue
+        else:
+            if target_genre_key not in it_genre: continue
+    
+    if f_app:
+        if not any(s.get("status") == "応募中" for s in it.get("sites", [])): continue
+    filtered_items.append(it)
+
+# ソート処理
 if sort_mode == "利益額が高い順":
-    norm_items.sort(key=lambda x: x.get("profit", 0), reverse=True)
+    filtered_items.sort(key=lambda x: x.get("profit", 0), reverse=True)
 elif sort_mode == "利益率が高い順":
-    norm_items.sort(key=lambda x: x.get("margin_rate", 0), reverse=True)
+    filtered_items.sort(key=lambda x: x.get("margin_rate", 0), reverse=True)
 elif sort_mode == "予想相場が高い順":
-    norm_items.sort(key=lambda x: x.get("market_price", 0), reverse=True)
+    filtered_items.sort(key=lambda x: x.get("market_price", 0), reverse=True)
 elif sort_mode == "締切が近い順":
     def get_min_deadline(it):
         dls = [s.get("deadline_date") for s in it.get("sites", []) if s.get("deadline_date")]
         return min(dls) if dls else "9999-99-99"
-    norm_items.sort(key=get_min_deadline)
+    filtered_items.sort(key=get_min_deadline)
 elif sort_mode == "新着順":
-    norm_items.sort(key=lambda x: str(x.get("id", "")), reverse=True)
+    filtered_items.sort(key=lambda x: str(x.get("id", "")), reverse=True)
 else:
-    norm_items.sort(key=lambda x: str(x.get("updated_at", "")), reverse=True)
+    filtered_items.sort(key=lambda x: str(x.get("updated_at", "")), reverse=True)
 
-for item in norm_items:
+for item in filtered_items:
     sites = item.get("sites", [])
     has_app = any(s.get("status") == "応募中" for s in sites)
-    if f_app and not has_app: continue
     
     badge = "【応募中あり】" if has_app else ""
-    p_disp = f"+{item.get('profit', 0):,}円" if item.get('profit') else ""
+    prof_val = item.get('profit', 0)
     
-    with st.expander(f"📦 {item.get('name','')} {p_disp} {badge}"):
+    # 利益額に応じた視覚アイコン（🔥/💰）
+    if prof_val >= 50000:
+        prof_icon = "🔥 "
+    elif prof_val >= 10000:
+        prof_icon = "💰 "
+    else:
+        prof_icon = ""
+    
+    p_disp = f"{prof_icon}+{prof_val:,}円" if prof_val else ""
+    g_icon = get_genre_icon(item.get('sns_genre', ''))
+    
+    with st.expander(f"{g_icon} {item.get('name','')} {p_disp} {badge}"):
         ci, cd = st.columns([5, 1])
         ci.caption(f"ジャンル: {item.get('sns_genre','')} | 掲載日: {item.get('created_at','-')} | 更新日: {item.get('updated_at','-')}")
         if cd.button("削除", key=f"d_{item['id']}"):
