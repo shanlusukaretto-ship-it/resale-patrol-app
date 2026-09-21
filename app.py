@@ -2,27 +2,29 @@ import streamlit as st
 import datetime
 import urllib.parse
 import json
+import time
 import feedparser
 from google import genai
 from supabase import create_client, Client
 
 st.set_page_config(
-    page_title="プレミア価格サーチ",
-    page_icon="⚔️",
+    page_title="プレミア商品確認ツール",
+    page_icon="📦",
     layout="wide",
     initial_sidebar_state="collapsed"
 )
 
-# 転売クエスト風のカード・バッジCSS
+# スタイル定義
 st.markdown("""
 <style>
-    .quest-card {
-        background-color: #ffffff;
-        border: 1px solid #e2e8f0;
-        border-radius: 12px;
-        padding: 16px;
-        margin-bottom: 20px;
-        box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05);
+    .badge-applying {
+        background-color: #ff4b4b;
+        color: white;
+        padding: 3px 8px;
+        border-radius: 6px;
+        font-weight: bold;
+        font-size: 0.8rem;
+        margin-left: 8px;
     }
     .badge-genre {
         background-color: #f1f5f9;
@@ -40,22 +42,16 @@ st.markdown("""
         border-radius: 6px;
         font-weight: bold;
     }
-    .badge-loss {
-        background-color: #fee2e2;
-        color: #991b1b;
-        font-size: 0.85rem;
-        padding: 4px 10px;
-        border-radius: 6px;
-        font-weight: bold;
+    .site-card {
+        background-color: #f8fafc;
+        border: 1px solid #e2e8f0;
+        border-radius: 8px;
+        padding: 12px;
+        margin-bottom: 8px;
     }
-    .price-label {
+    .date-text {
         font-size: 0.8rem;
         color: #64748b;
-        margin-bottom: -2px;
-    }
-    .price-val {
-        font-size: 1.15rem;
-        font-weight: 800;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -78,7 +74,7 @@ if "monitored_items" not in st.session_state:
 def load_db():
     if supabase:
         try:
-            res = supabase.table("items").select("*").order("deadline_date", desc=False).execute()
+            res = supabase.table("items").select("*").order("id", desc=True).execute()
             return res.data
         except Exception:
             return st.session_state.monitored_items
@@ -93,6 +89,13 @@ def save_to_db(item):
             st.session_state.monitored_items.append(item)
     else:
         st.session_state.monitored_items.append(item)
+
+def update_item_in_db(item_id, update_data):
+    if supabase:
+        try:
+            supabase.table("items").update(update_data).eq("id", item_id).execute()
+        except Exception:
+            pass
 
 def delete_from_db(item_id):
     if supabase:
@@ -112,23 +115,24 @@ def analyze_master_intelligence(name, url, genre, raw_text=""):
         today_str = datetime.date.today().strftime("%Y-%m-%d")
         
         prompt = f"""
-本日は {today_str} です。あなたは限定アイテム（ソフビ、TCG、プレバン限定品、スニーカー、ホビー）の利益・相場予測アナリストです。
-情報をもとに、定価、予想転売相場、抽選締切日、おすすめ度を推計し、純粋なJSONのみ出力してください。
+本日は {today_str} です。限定アイテム（ソフビ、TCG、プレバン、ホビー）のアナリストとして情報解析を行ってください。
+必ず純粋なJSONのみを出力してください。
 
 【対象】
 - タイトル: {name}
-- URL: {url}
+- 参照URL: {url}
 - ジャンル: {genre}
-- 本文: {raw_text[:400]}
+- 本文抜粋: {raw_text[:400]}
 
 【JSONフォーマット】
 {{
-  "name": "商品名（25文字以内で分かりやすく）",
+  "name": "商品名（統一名称・25文字以内）",
+  "site_name": "サイト名・受付店舗名（例：プレミアムバンダイ、あみあみ、ポケモンセンター等）",
   "retail_price": 5500,
   "market_price": 12000,
   "deadline_date": "{today_str}",
   "rating": "S",
-  "comment": "即完売・高プレ値期待"
+  "comment": "注目案件"
 }}
 """
         response = client.models.generate_content(
@@ -139,7 +143,7 @@ def analyze_master_intelligence(name, url, genre, raw_text=""):
         txt = response.text.strip().replace("```json", "").replace("```", "").strip()
         data = json.loads(txt)
         data["url"] = url if url else "https://google.com"
-        data["sns_genre"] = genre
+        data["genre"] = genre
         return data
     except Exception:
         return None
@@ -148,11 +152,10 @@ def analyze_master_intelligence(name, url, genre, raw_text=""):
 def fetch_patrol_targets():
     targets = []
     queries = [
-        ("ワンピースカード 抽選", "TCG"),
-        ("ポケモンカード 予約抽選", "TCG"),
-        ("プレミアムバンダイ 限定 予約", "プレバン"),
-        ("ソフビ 抽選販売", "ソフビ"),
-        ("Nike SNKRS 抽選", "スニーカー")
+        ("ワンピースカード 抽選予約", "TCG"),
+        ("ポケモンカード 抽選予約", "TCG"),
+        ("プレミアムバンダイ 受注開始", "プレバン"),
+        ("ソフビ 抽選販売", "ソフビ")
     ]
     for q, genre in queries:
         encoded_q = urllib.parse.quote(q)
@@ -167,56 +170,31 @@ def fetch_patrol_targets():
     return targets
 
 # --- ヘッダー ---
-st.title("⚔️ 転売・限定品自衛クエスト")
-st.caption("スニダン相場・TCG・プレバン・限定ソフビの定価自衛＆プレミア案件ダッシュボード")
+st.title("プレミア商品確認ツール")
 
+# 巡回＆投入コントロール
 col_btn1, col_btn2 = st.columns([1, 1])
+
 with col_btn1:
-    if st.button("🔄 全自動で最新速報を巡回収集", use_container_width=True):
-        with st.spinner("速報RSSを巡回し、Geminiで利益推計中..."):
-            existing_urls = [x.get("url") for x in load_db()]
-            crawler_hits = fetch_patrol_targets()
-            new_count = 0
-            for h in crawler_hits:
-                if h["url"] not in existing_urls:
-                    parsed = analyze_master_intelligence(h["name"], h["url"], h["genre"], raw_text=h["summary"])
-                    if parsed:
-                        f_retail = int(parsed.get("retail_price", 0))
-                        f_market = int(parsed.get("market_price", 0))
-                        profit = f_market - int(f_market * 0.10) - 750 - f_retail
-                        margin = round((profit / f_market) * 100, 1) if f_market > 0 else 0
-                        break_even = int((f_retail + 750) / 0.90)
-
-                        record = {
-                            "id": str(int(datetime.datetime.now().timestamp()) + new_count),
-                            "name": parsed["name"],
-                            "url": parsed["url"],
-                            "deadline_date": parsed["deadline_date"],
-                            "retail_price": f_retail,
-                            "market_price": f_market,
-                            "profit": profit,
-                            "margin_rate": margin,
-                            "break_even": break_even,
-                            "rating": parsed.get("rating", "A"),
-                            "comment": parsed.get("comment", ""),
-                            "sns_genre": parsed["sns_genre"]
-                        }
-                        save_to_db(record)
-                        new_count += 1
-            if new_count > 0:
-                st.success(f"新たに {new_count} 件の案件を追加しました！")
-                st.rerun()
-            else:
-                st.info("新規案件はありませんでした。")
-
-with col_btn2:
-    with st.popover("➕ 手動で案件を投入"):
-        in_url = st.text_input("公式・告知URL")
-        in_post = st.text_area("本文・告知文コピペ")
-        in_genre = st.selectbox("ジャンル", ["TCG", "ソフビ", "プレバン", "スニーカー", "その他"])
-        if st.button("AI解析して追加", use_container_width=True):
-            if in_url or in_post:
-                parsed = analyze_master_intelligence(in_post[:25] or "新規案件", in_url, in_genre, raw_text=in_post)
+    if st.button("🔄 全自動で最新情報を巡回収集", use_container_width=True):
+        progress_text = st.empty()
+        progress_bar = st.progress(0)
+        
+        crawler_hits = fetch_patrol_targets()
+        total_steps = len(crawler_hits) if crawler_hits else 1
+        all_items = load_db()
+        existing_urls = [x.get("url") for x in all_items]
+        
+        today_str = datetime.date.today().strftime("%Y-%m-%d")
+        new_count = 0
+        
+        for idx, h in enumerate(crawler_hits):
+            percent = int(((idx + 1) / total_steps) * 100)
+            progress_text.markdown(f"**速報を巡回中... {percent}%**")
+            progress_bar.progress((idx + 1) / total_steps)
+            
+            if h["url"] not in existing_urls:
+                parsed = analyze_master_intelligence(h["name"], h["url"], h["genre"], raw_text=h["summary"])
                 if parsed:
                     f_retail = int(parsed.get("retail_price", 0))
                     f_market = int(parsed.get("market_price", 0))
@@ -224,11 +202,90 @@ with col_btn2:
                     margin = round((profit / f_market) * 100, 1) if f_market > 0 else 0
                     break_even = int((f_retail + 750) / 0.90)
 
-                    record = {
+                    # 申込みサイトデータ
+                    site_entry = {
+                        "site_name": parsed.get("site_name", "公式/速報サイト"),
+                        "url": parsed["url"],
+                        "created_at": today_str,
+                        "updated_at": today_str,
+                        "deadline_date": parsed["deadline_date"],
+                        "status": "未応募"
+                    }
+
+                    # 同名商品が既に存在するか確認
+                    matched_item = next((it for it in all_items if it.get("name") == parsed["name"]), None)
+                    
+                    if matched_item:
+                        # 既存商品にサイトを追加
+                        current_sites = matched_item.get("sites") or []
+                        current_sites.append(site_entry)
+                        update_item_in_db(matched_item["id"], {
+                            "sites": current_sites,
+                            "updated_at": today_str
+                        })
+                    else:
+                        # 新規商品として登録
+                        new_record = {
+                            "id": str(int(datetime.datetime.now().timestamp()) + new_count),
+                            "name": parsed["name"],
+                            "url": parsed["url"],
+                            "retail_price": f_retail,
+                            "market_price": f_market,
+                            "profit": profit,
+                            "margin_rate": margin,
+                            "break_even": break_even,
+                            "rating": parsed.get("rating", "A"),
+                            "comment": parsed.get("comment", ""),
+                            "sns_genre": parsed["genre"],
+                            "created_at": today_str,
+                            "updated_at": today_str,
+                            "sites": [site_entry]
+                        }
+                        save_to_db(new_record)
+                        all_items.append(new_record)
+                        
+                    new_count += 1
+            time.sleep(0.1)
+
+        progress_bar.empty()
+        progress_text.empty()
+        
+        if new_count > 0:
+            st.success(f"巡回完了：新たに {new_count} 件の情報を更新しました！")
+            st.rerun()
+        else:
+            st.info("最新の案件はすべて反映済みです。")
+
+with col_btn2:
+    with st.popover("➕ 手動で案件を投入"):
+        in_name = st.text_input("商品名（空欄ならAIが自動判定）")
+        in_url = st.text_input("申込みURL / 公式URL")
+        in_post = st.text_area("告知文・投稿テキスト")
+        in_genre = st.selectbox("ジャンル", ["TCG", "プレバン", "ソフビ", "スニーカー", "その他"])
+        if st.button("登録する", use_container_width=True):
+            if in_url or in_post:
+                parsed = analyze_master_intelligence(in_name or in_post[:25], in_url, in_genre, raw_text=in_post)
+                if parsed:
+                    today_str = datetime.date.today().strftime("%Y-%m-%d")
+                    f_retail = int(parsed.get("retail_price", 0))
+                    f_market = int(parsed.get("market_price", 0))
+                    profit = f_market - int(f_market * 0.10) - 750 - f_retail
+                    margin = round((profit / f_market) * 100, 1) if f_market > 0 else 0
+                    break_even = int((f_retail + 750) / 0.90)
+
+                    site_entry = {
+                        "site_name": parsed.get("site_name", "手動登録サイト"),
+                        "url": parsed["url"],
+                        "created_at": today_str,
+                        "updated_at": today_str,
+                        "deadline_date": parsed["deadline_date"],
+                        "status": "未応募"
+                    }
+
+                    new_record = {
                         "id": str(int(datetime.datetime.now().timestamp())),
                         "name": parsed["name"],
                         "url": parsed["url"],
-                        "deadline_date": parsed["deadline_date"],
                         "retail_price": f_retail,
                         "market_price": f_market,
                         "profit": profit,
@@ -236,63 +293,108 @@ with col_btn2:
                         "break_even": break_even,
                         "rating": parsed.get("rating", "A"),
                         "comment": parsed.get("comment", ""),
-                        "sns_genre": parsed["sns_genre"]
+                        "sns_genre": parsed["genre"],
+                        "created_at": today_str,
+                        "updated_at": today_str,
+                        "sites": [site_entry]
                     }
-                    save_to_db(record)
-                    st.success("追加しました！")
+                    save_to_db(new_record)
+                    st.success("登録完了しました！")
                     st.rerun()
 
 st.markdown("---")
 
-# --- 案件カード表示（転売クエスト風） ---
+# --- 商品一覧表示 ---
 items = load_db()
-st.subheader(f"🔥 ピックアップ案件一覧 ({len(items)}件)")
+filter_applying = st.checkbox("【応募中】がある商品のみ表示")
 
 if not items:
-    st.info("現在監視中の案件はありません。「全自動で最新速報を巡回収集」を実行してください。")
+    st.info("現在監視中の商品はありません。「全自動で最新情報を巡回収集」を実行してください。")
 else:
     for item in items:
-        # カードコンテナ
-        with st.container(border=True):
-            head_col, del_col = st.columns([6, 1])
-            with head_col:
-                genre = item.get("sns_genre", "ホビー")
-                rating = item.get("rating", "A")
-                st.markdown(f"<span class='badge-genre'>{genre}</span> ｜ **期待度: ランク {rating}**", unsafe_allow_html=True)
-                st.markdown(f"### {item.get('name')}")
-                if item.get("comment"):
-                    st.caption(f"💡 {item.get('comment')}")
-            with del_col:
-                if st.button("🗑️", key=f"del_{item['id']}", help="削除"):
+        raw_sites = item.get("sites") or []
+        # レガシーデータの救済
+        if not raw_sites and item.get("url"):
+            raw_sites = [{
+                "site_name": "公式受付",
+                "url": item.get("url"),
+                "created_at": item.get("created_at", "2026-09-21"),
+                "updated_at": item.get("updated_at", "2026-09-21"),
+                "deadline_date": item.get("deadline_date", "未定"),
+                "status": "未応募"
+            }]
+
+        has_applying = any(s.get("status") == "応募中" for s in raw_sites)
+
+        if filter_applying and not has_applying:
+            continue
+
+        created_dt = item.get("created_at", "-")
+        updated_dt = item.get("updated_at", "-")
+        applying_badge = "<span class='badge-applying'>応募中あり</span>" if has_applying else ""
+
+        title_header = f"{item.get('name')} （利益見込: +{item.get('profit', 0):,} 円）"
+
+        # 商品トップ（タップで展開するExpander）
+        with st.expander(f"📦 {item.get('name')}　{'+' + str(f'{item.get(\"profit\", 0):,}') + '円' if item.get('profit') else ''}", expanded=False):
+            # トップ概要
+            col_info, col_del = st.columns([5, 1])
+            with col_info:
+                st.markdown(f"**ジャンル**: <span class='badge-genre'>{item.get('sns_genre', '一般')}</span> {applying_badge}", unsafe_allow_html=True)
+                st.markdown(f"<span class='date-text'>初回掲載日: {created_dt} ｜ 最終更新日: {updated_dt}</span>", unsafe_allow_html=True)
+            with col_del:
+                if st.button("削除", key=f"del_prod_{item['id']}", help="商品ごと削除"):
                     delete_from_db(item["id"])
                     st.rerun()
 
-            # 価格パネル
+            # 価格情報サマリー
             m1, m2, m3, m4 = st.columns(4)
-            with m1:
-                st.markdown("<p class='price-label'>定価（税込）</p>", unsafe_allow_html=True)
-                st.markdown(f"<p class='price-val'>¥{item.get('retail_price', 0):,}</p>", unsafe_allow_html=True)
-            with m2:
-                st.markdown("<p class='price-label'>予想相場</p>", unsafe_allow_html=True)
-                st.markdown(f"<p class='price-val'>¥{item.get('market_price', 0):,}</p>", unsafe_allow_html=True)
-            with m3:
-                profit = item.get("profit", 0)
-                margin = item.get("margin_rate", 0)
-                st.markdown("<p class='price-label'>見込み利益 (利益率)</p>", unsafe_allow_html=True)
-                badge_class = "badge-profit" if profit > 0 else "badge-loss"
-                st.markdown(f"<span class='{badge_class}'>+{profit:,} 円 ({margin}%)</span>", unsafe_allow_html=True)
-            with m4:
-                st.markdown("<p class='price-label'>損益分岐ライン</p>", unsafe_allow_html=True)
-                st.markdown(f"<p class='price-val' style='color:#dc2626;'>¥{item.get('break_even', 0):,}</p>", unsafe_allow_html=True)
+            m1.metric("定価", f"¥{item.get('retail_price', 0):,}")
+            m2.metric("予想相場", f"¥{item.get('market_price', 0):,}")
+            m3.metric("見込み利益", f"¥{item.get('profit', 0):,}", f"{item.get('margin_rate', 0)}%")
+            m4.metric("損益分岐", f"¥{item.get('break_even', 0):,}")
 
-            st.write("")
-
-            # アクションボタン群
-            btn_c1, btn_c2, btn_c3 = st.columns([1, 1, 1])
+            # 相場クイックアクセス
             kw = urllib.parse.quote(item.get("name", ""))
-            with btn_c1:
-                st.link_button("👟 スニダン相場を見る", f"https://snkrdunk.com/search?keywords={kw}", use_container_width=True)
-            with btn_c2:
-                st.link_button("🔴 メルカリ相場を見る", f"https://jp.mercari.com/search?keyword={kw}", use_container_width=True)
-            with btn_c3:
-                st.link_button("⚡ 公式抽選・販売ページへ", item.get("url", "https://google.com"), use_container_width=True)
+            q_col1, q_col2 = st.columns(2)
+            q_col1.link_button("👟 スニダン相場を確認", f"https://snkrdunk.com/search?keywords={kw}", use_container_width=True)
+            # メルカリ：売り切れのみ（status=sold_out）絞り込みパラメータ付き
+            q_col2.link_button("🔴 メルカリ直近落札相場", f"https://jp.mercari.com/search?keyword={kw}&status=sold_out", use_container_width=True)
+
+            st.markdown("#### 📝 申込み・抽選サイト一覧")
+
+            updated_sites = False
+            for s_idx, s in enumerate(raw_sites):
+                with st.container():
+                    st.markdown(f"""
+                    <div class='site-card'>
+                        <strong>🔗 {s.get('site_name', '受付サイト')}</strong><br>
+                        <span class='date-text'>初回記載日: {s.get('created_at', '-')} ｜ 更新日: {s.get('updated_at', '-')} ｜ 締切日: <b>{s.get('deadline_date', '未定')}</b></span>
+                    </div>
+                    """, unsafe_allow_html=True)
+
+                    c_status, c_link = st.columns([2, 2])
+                    with c_status:
+                        current_st = s.get("status", "未応募")
+                        new_st = st.selectbox(
+                            "応募ステータス",
+                            ["未応募", "応募中", "当選", "落選"],
+                            index=["未応募", "応募中", "当選", "落選"].index(current_st) if current_st in ["未応募", "応募中", "当選", "落選"] else 0,
+                            key=f"status_{item['id']}_{s_idx}"
+                        )
+                        if new_st != current_st:
+                            s["status"] = new_st
+                            s["updated_at"] = datetime.date.today().strftime("%Y-%m-%d")
+                            updated_sites = True
+
+                    with c_link:
+                        st.write("")
+                        st.link_button("👉 受付ページへ飛ぶ", s.get("url", "https://google.com"), use_container_width=True)
+
+            if updated_sites:
+                today_str = datetime.date.today().strftime("%Y-%m-%d")
+                update_item_in_db(item["id"], {
+                    "sites": raw_sites,
+                    "updated_at": today_str
+                })
+                st.rerun()
